@@ -161,6 +161,39 @@ export const dynamicRoutes = [
         meta: { title: '修改生成配置', activeMenu: '/tool/gen' }
       }
     ]
+  },
+  {
+    path: '/mqtt',
+    component: Layout,
+    redirect: 'noRedirect',
+    alwaysShow: true,
+    meta: { title: 'MQTT云控', icon: 'monitor' },
+    children: [
+      {
+        path: 'device',
+        component: () => import('@/views/mqtt/device/index'),
+        name: 'MqttDevice',
+        meta: { title: '设备管理', icon: 'monitor' }
+      },
+      {
+        path: 'config',
+        component: () => import('@/views/mqtt/config/index'),
+        name: 'MqttConfig',
+        meta: { title: '任务配置', icon: 'edit' }
+      },
+      {
+        path: 'connection',
+        component: () => import('@/views/mqtt/connection/index'),
+        name: 'MqttConnection',
+        meta: { title: '连接设置', icon: 'link' }
+      },
+      {
+        path: 'log',
+        component: () => import('@/views/mqtt/log/index'),
+        name: 'MqttLog',
+        meta: { title: '操作日志', icon: 'log' }
+      }
+    ]
   }
 ]
 

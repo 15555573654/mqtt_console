@@ -1,0 +1,166 @@
+package com.ruoyi.system.service.impl;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
+import com.ruoyi.system.service.IDeviceManagerService;
+import com.ruoyi.system.service.IMqttMessageHandler;
+
+/**
+ * MQTT消息处理器实现
+ * 
+ * @author ruoyi
+ * @date 2025-01-19
+ */
+@Service
+public class MqttMessageHandlerImpl implements IMqttMessageHandler
+{
+    private static final Logger log = LoggerFactory.getLogger(MqttMessageHandlerImpl.class);
+
+    @Autowired
+    private IDeviceManagerService deviceManagerService;
+
+    @Override
+    public void handleMessage(String topic, String payload)
+    {
+        try
+        {
+            log.info("开始处理消息: topic={}", topic);
+            
+            // 解析JSON消息
+            JSONObject msgData = JSON.parseObject(payload);
+            String deviceName = msgData.getString("deviceName");
+            
+            log.info("解析消息: deviceName={}", deviceName);
+
+            // 提取用户名
+            String username = extractUsername(topic);
+            log.info("提取用户名: username={}", username);
+
+            // 处理状态更新消息
+            if (topic.contains("/status/") || topic.startsWith("status/"))
+            {
+                log.info("处理状态消息");
+                handleStatusMessage(deviceName, username, msgData);
+            }
+            // 处理响应消息
+            else if (topic.contains("/response/") || topic.startsWith("response/"))
+            {
+                log.info("处理响应消息");
+                handleResponseMessage(deviceName, username, msgData);
+            }
+            // 处理配置消息
+            else if (topic.contains("/config/") || topic.startsWith("config/"))
+            {
+                log.info("处理配置消息");
+                handleConfigMessage(deviceName, username, msgData);
+            }
+            else
+            {
+                log.warn("未知的消息类型: topic={}", topic);
+            }
+        }
+        catch (Exception e)
+        {
+            log.error("处理MQTT消息失败: topic={}, payload={}", topic, payload, e);
+        }
+    }
+
+    /**
+     * 处理状态消息
+     */
+    private void handleStatusMessage(String deviceName, String username, JSONObject msgData)
+    {
+        String status = msgData.getString("status");
+        if (status != null && !status.isEmpty())
+        {
+            // 转换状态
+            if ("offline".equals(status))
+            {
+                status = "离线";
+            }
+            else if ("online".equals(status))
+            {
+                status = "在线";
+            }
+
+            deviceManagerService.updateDeviceStatus(deviceName, username, status);
+        }
+    }
+
+    /**
+     * 处理响应消息
+     */
+    private void handleResponseMessage(String deviceName, String username, JSONObject msgData)
+    {
+        String response = msgData.getString("response");
+
+        if ("停止".equals(response))
+        {
+            deviceManagerService.updateScriptStatus(deviceName, username, "未运行");
+        }
+        else if ("运行中".equals(response))
+        {
+            deviceManagerService.updateScriptStatus(deviceName, username, "运行中");
+        }
+        else if ("暂停".equals(response))
+        {
+            deviceManagerService.updateScriptStatus(deviceName, username, "暂停");
+        }
+    }
+
+    /**
+     * 处理配置消息
+     */
+    private void handleConfigMessage(String deviceName, String username, JSONObject msgData)
+    {
+        log.info("处理配置消息: deviceName={}, username={}, msgData={}", deviceName, username, msgData);
+        
+        // 收到任何配置消息都表示设备在线 - 先更新状态
+        log.info("更新设备状态为在线: deviceName={}, username={}", deviceName, username);
+        deviceManagerService.updateDeviceStatus(deviceName, username, "在线");
+        
+        String msgAction = msgData.getString("type");
+        String msgContent = msgData.getString("msg");
+
+        if ("post".equals(msgAction) && msgContent != null && !msgContent.isEmpty())
+        {
+            // 处理数据更新
+            handleDataUpdate(deviceName, username, msgContent);
+        }
+    }
+
+    /**
+     * 处理数据更新
+     */
+    private void handleDataUpdate(String deviceName, String username, String msgContent)
+    {
+        try
+        {
+            JSONObject gameData = JSON.parseObject(msgContent);
+            deviceManagerService.updateGameData(deviceName, username, gameData);
+        }
+        catch (Exception e)
+        {
+            log.error("解析游戏数据失败: deviceName={}", deviceName, e);
+        }
+    }
+
+    /**
+     * 从主题中提取用户名
+     */
+    private String extractUsername(String topic)
+    {
+        // 主题格式: response/{username}/{deviceName} 或 status/{username}/{deviceName}
+        String[] parts = topic.split("/");
+        if (parts.length >= 2)
+        {
+            return parts[1];
+        }
+        return "";
+    }
+}
