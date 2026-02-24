@@ -12,7 +12,7 @@ public interface IMqttService
 {
     /**
      * 连接到MQTT服务器
-     * 
+     *
      * @param username 用户名
      * @param password 密码
      * @return 是否连接成功

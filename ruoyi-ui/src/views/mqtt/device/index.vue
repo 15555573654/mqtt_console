@@ -75,6 +75,43 @@
         <el-button type="primary" icon="el-icon-search" size="mini" @click="handleQuery">搜索</el-button>
         <el-button icon="el-icon-refresh" size="mini" @click="resetQuery">重置</el-button>
       </el-form-item>
+
+      <!-- MQTT连接设置 - 右侧 -->
+      <div style="float: right">
+        <el-form ref="connectionForm" :model="connectionForm" :rules="connectionRules" inline size="small">
+          <el-form-item label="服务器状态">
+            <el-tag :type="isConnected ? 'success' : 'info'" size="medium">
+              {{ isConnected ? '已连接' : '未连接' }}
+            </el-tag>
+            <span v-if="isConnected" style="margin-left: 10px; color: #67C23A; font-size: 12px">
+              <i class="el-icon-user"></i> {{ currentUsername }}
+            </span>
+          </el-form-item>
+          <el-form-item prop="username">
+            <el-input v-model="connectionForm.username" placeholder="用户名" :disabled="isConnected" style="width: 120px" />
+          </el-form-item>
+          <el-form-item prop="password">
+            <el-input v-model="connectionForm.password" type="password" placeholder="密码" show-password :disabled="isConnected" style="width: 120px" />
+          </el-form-item>
+          <el-form-item>
+            <el-button
+              v-if="!isConnected"
+              type="primary"
+              size="small"
+              @click="handleConnect"
+              :loading="connecting"
+              v-hasPermi="['mqtt:connection:connect']"
+            >连接</el-button>
+            <el-button
+              v-else
+              type="danger"
+              size="small"
+              @click="handleDisconnect"
+              v-hasPermi="['mqtt:connection:disconnect']"
+            >断开</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
     </el-form>
 
     <!-- 操作按钮 -->
@@ -85,7 +122,7 @@
           plain
           icon="el-icon-video-play"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleCommand('start')"
           v-hasPermi="['mqtt:device:command']"
         >启动</el-button>
@@ -96,7 +133,7 @@
           plain
           icon="el-icon-video-pause"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleCommand('stop')"
           v-hasPermi="['mqtt:device:command']"
         >停止</el-button>
@@ -107,7 +144,7 @@
           plain
           icon="el-icon-video-pause"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleCommand('pause')"
           v-hasPermi="['mqtt:device:command']"
         >暂停</el-button>
@@ -118,7 +155,7 @@
           plain
           icon="el-icon-video-play"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleCommand('resume')"
           v-hasPermi="['mqtt:device:command']"
         >恢复</el-button>
@@ -129,7 +166,7 @@
           plain
           icon="el-icon-refresh"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleCommand('updateScript')"
           v-hasPermi="['mqtt:device:command']"
         >更新脚本</el-button>
@@ -140,7 +177,7 @@
           plain
           icon="el-icon-delete"
           size="mini"
-          :disabled="multiple"
+          :disabled="multiple || !isConnected"
           @click="handleDelete"
           v-hasPermi="['mqtt:device:remove']"
         >删除设备</el-button>
@@ -191,11 +228,28 @@
 
 <script>
 import { listDevice, delDevice, sendCommand, getStatistics } from "@/api/mqtt/device";
+import { connect, disconnect, getStatus } from "@/api/mqtt/connection";
 
 export default {
   name: "MqttDevice",
   data() {
     return {
+      // MQTT连接相关
+      isConnected: false,
+      currentUsername: '',
+      connecting: false,
+      connectionForm: {
+        username: '',
+        password: ''
+      },
+      connectionRules: {
+        username: [
+          { required: true, message: "用户名不能为空", trigger: "blur" }
+        ],
+        password: [
+          { required: true, message: "密码不能为空", trigger: "blur" }
+        ]
+      },
       // 遮罩层
       loading: true,
       // 选中数组
@@ -225,6 +279,11 @@ export default {
     };
   },
   created() {
+    // 从localStorage加载连接配置
+    this.loadConnectionConfig();
+    // 获取连接状态
+    this.getConnectionStatus();
+    // 获取设备列表和统计
     this.getList();
     this.getStatistics();
     // 每10秒刷新一次数据
@@ -238,6 +297,63 @@ export default {
     }
   },
   methods: {
+    /** 加载连接配置 */
+    loadConnectionConfig() {
+      const config = localStorage.getItem('mqttConnectionConfig');
+      if (config) {
+        try {
+          const savedConfig = JSON.parse(config);
+          this.connectionForm = { ...this.connectionForm, ...savedConfig };
+        } catch (e) {
+          console.error('加载连接配置失败', e);
+        }
+      }
+    },
+    /** 保存连接配置 */
+    saveConnectionConfig() {
+      localStorage.setItem('mqttConnectionConfig', JSON.stringify(this.connectionForm));
+    },
+    /** 获取连接状态 */
+    getConnectionStatus() {
+      getStatus().then(response => {
+        this.isConnected = response.data.connected;
+        this.currentUsername = response.data.username;
+      }).catch(() => {
+        this.isConnected = false;
+        this.currentUsername = '';
+      });
+    },
+    /** 连接MQTT */
+    handleConnect() {
+      this.$refs["connectionForm"].validate(valid => {
+        if (valid) {
+          this.connecting = true;
+          connect(this.connectionForm).then(response => {
+            this.$modal.msgSuccess("MQTT连接成功");
+            this.saveConnectionConfig();
+            this.getConnectionStatus();
+            this.refreshData();
+            this.connecting = false;
+          }).catch(() => {
+            this.connecting = false;
+          });
+        }
+      });
+    },
+    /** 断开连接 */
+    handleDisconnect() {
+      this.$modal.confirm('是否确认断开MQTT连接？').then(() => {
+        return disconnect();
+      }).then(() => {
+        this.$modal.msgSuccess("MQTT连接已断开");
+        this.getConnectionStatus();
+      }).catch(() => {});
+    },
+    /** 刷新连接状态 */
+    handleRefreshStatus() {
+      this.getConnectionStatus();
+      this.$modal.msgSuccess("状态已刷新");
+    },
     /** 查询设备列表 */
     getList() {
       this.loading = true;
@@ -338,6 +454,12 @@ export default {
 .statistic-label {
   font-size: 14px;
   color: #909399;
+  margin-top: 5px;
+}
+
+.statistic-username {
+  font-size: 12px;
+  color: #67C23A;
   margin-top: 5px;
 }
 </style>

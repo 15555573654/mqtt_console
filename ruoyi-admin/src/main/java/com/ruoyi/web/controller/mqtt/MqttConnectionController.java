@@ -36,9 +36,14 @@ public class MqttConnectionController extends BaseController
         String username = params.get("username");
         String password = params.get("password");
 
-        if (username == null || username.length() < 5)
+        if (username == null || username.trim().isEmpty())
         {
-            return error("用户名长度至少5位");
+            return error("用户名不能为空");
+        }
+
+        if (password == null || password.trim().isEmpty())
+        {
+            return error("密码不能为空");
         }
 
         boolean success = mqttService.connect(username, password);
@@ -49,7 +54,7 @@ public class MqttConnectionController extends BaseController
         }
         else
         {
-            return error("MQTT连接失败");
+            return error("MQTT连接失败，请检查用户名和密码");
         }
     }
 
