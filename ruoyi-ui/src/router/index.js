@@ -87,6 +87,19 @@ export const constantRoutes = [
         meta: { title: '个人中心', icon: 'user' }
       }
     ]
+  },
+  {
+    path: '/tool/testcase-detail',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: ':caseId(\\d+)',
+        component: () => import('@/views/tool/testcase/detail'),
+        name: 'TestCaseDetail',
+        meta: { title: '测试用例详情', activeMenu: '/tool/testcase' }
+      }
+    ]
   }
 ]
 
