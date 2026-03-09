@@ -182,6 +182,12 @@ export const dynamicRoutes = [
         meta: { title: '任务配置', icon: 'edit' }
       },
       {
+        path: 'screencast',
+        component: () => import('@/views/mqtt/screencast/index'),
+        name: 'Screencast',
+        meta: { title: '投屏控制', icon: 'video-camera' }
+      },
+      {
         path: 'log',
         component: () => import('@/views/mqtt/log/index'),
         name: 'MqttLog',
