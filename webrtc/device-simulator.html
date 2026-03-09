@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>设备端模拟器 - WebRTC投屏测试</title>
+    <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 20px;
+        }
+        
+        .content {
+            padding: 20px;
+        }
+        
+        .section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        .section h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 16px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: #fff;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: #fff;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: #fff;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .video-preview {
+            width: 100%;
+            max-width: 400px;
+            background: #000;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .video-preview video {
+            width: 100%;
+            display: block;
+        }
+        
+        .log-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+        }
+        
+        .log-entry.error {
+            color: #f48771;
+        }
+        
+        .log-entry.success {
+            color: #89d185;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 设备端模拟器 - WebRTC投屏测试</h1>
+        </div>
+        
+        <div class="content">
+            <!-- MQTT连接配置 -->
+            <div class="section">
+                <h3>1. MQTT连接配置</h3>
+                <div class="form-group">
+                    <label>MQTT服务器地址</label>
+                    <input type="text" id="mqttHost" value="192.168.1.132" placeholder="例如: 192.168.1.132">
+                </div>
+                <div class="form-group">
+                    <label>WebSocket端口</label>
+                    <input type="text" id="mqttPort" value="8083" placeholder="例如: 8083">
+                </div>
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="username" placeholder="输入用户名">
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="password" placeholder="输入密码">
+                </div>
+                <div class="form-group">
+                    <label>设备名称</label>
+                    <input type="text" id="deviceName" placeholder="例如: TestDevice001">
+                </div>
+                <div id="mqttStatus" class="status info">状态: 未连接</div>
+                <button class="btn-primary" id="connectBtn">连接MQTT</button>
+                <button class="btn-danger" id="disconnectBtn" disabled>断开连接</button>
+            </div>
+            
+            <!-- 视频源选择 -->
+            <div class="section">
+                <h3>2. 选择视频源</h3>
+                <div class="form-group">
+                    <label>视频源类型</label>
+                    <select id="videoSource">
+                        <option value="screen">屏幕共享</option>
+                        <option value="camera">摄像头</option>
+                        <option value="test">测试视频</option>
+                    </select>
+                </div>
+                <button class="btn-success" id="startVideoBtn" disabled>开始捕获视频</button>
+                <button class="btn-danger" id="stopVideoBtn" disabled>停止视频</button>
+                <button class="btn-primary" id="testMqttBtn" disabled>测试MQTT通信</button>
+                
+                <div class="video-preview" style="margin-top: 15px;">
+                    <video id="localVideo" autoplay muted playsinline></video>
+                </div>
+            </div>
+            
+            <!-- WebRTC连接 -->
+            <div class="section">
+                <h3>3. WebRTC连接状态</h3>
+                <div id="webrtcStatus" class="status info">状态: 等待连接</div>
+                <p style="color: #666; font-size: 13px; margin-top: 10px;">
+                    提示: 在前端页面点击"投屏控制"后，这里会自动建立WebRTC连接
+                </p>
+            </div>
+            
+            <!-- 日志 -->
+            <div class="section">
+                <h3>4. 运行日志</h3>
+                <div class="log-box" id="logBox">
+                    <div class="log-entry">系统就绪，等待操作...</div>
+                </div>
+                <button class="btn-primary" style="margin-top: 10px;" id="clearLogBtn">清空日志</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 全局变量
+        let mqttClient = null;
+        let peerConnection = null;
+        let dataChannel = null;
+        let localStream = null;
+        let username = '';
+        let deviceName = '';
+        
+        // DOM元素
+        const mqttStatus = document.getElementById('mqttStatus');
+        const webrtcStatus = document.getElementById('webrtcStatus');
+        const logBox = document.getElementById('logBox');
+        const localVideo = document.getElementById('localVideo');
+        
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const startVideoBtn = document.getElementById('startVideoBtn');
+        const stopVideoBtn = document.getElementById('stopVideoBtn');
+        const clearLogBtn = document.getElementById('clearLogBtn');
+        const testMqttBtn = document.getElementById('testMqttBtn');
+        
+        // 日志函数
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+            console.log(message);
+        }
+        
+        // 更新MQTT状态
+        function updateMqttStatus(message, type = 'info') {
+            mqttStatus.textContent = '状态: ' + message;
+            mqttStatus.className = `status ${type}`;
+        }
+        
+        // 更新WebRTC状态
+        function updateWebRTCStatus(message, type = 'info') {
+            webrtcStatus.textContent = '状态: ' + message;
+            webrtcStatus.className = `status ${type}`;
+        }
+        
+        // 连接MQTT
+        connectBtn.addEventListener('click', () => {
+            const host = document.getElementById('mqttHost').value;
+            const port = document.getElementById('mqttPort').value;
+            username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            deviceName = document.getElementById('deviceName').value;
+            
+            if (!host || !port || !username || !password || !deviceName) {
+                alert('请填写完整的连接信息');
+                return;
+            }
+            
+            const url = `ws://${host}:${port}/mqtt`;
+            const clientId = 'device_simulator_' + Math.random().toString(16).substr(2, 8);
+            
+            log('正在连接MQTT服务器...');
+            updateMqttStatus('连接中...', 'info');
+            
+            mqttClient = mqtt.connect(url, {
+                clientId: clientId,
+                username: username,
+                password: password,
+                clean: true,
+                reconnectPeriod: 1000
+            });
+            
+            mqttClient.on('connect', () => {
+                log('MQTT连接成功', 'success');
+                updateMqttStatus('已连接', 'success');
+                
+                // 订阅WebRTC信令主题
+                const topic = `webrtc/${username}/${deviceName}`;
+                log('准备订阅主题: ' + topic);
+                
+                mqttClient.subscribe(topic, { qos: 1 }, (err) => {
+                    if (err) {
+                        log('订阅主题失败: ' + err.message, 'error');
+                        console.error('订阅失败:', err);
+                    } else {
+                        log('✓ 已成功订阅主题: ' + topic, 'success');
+                        console.log('✓ 订阅成功，等待接收消息...');
+                    }
+                });
+                
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                startVideoBtn.disabled = false;
+                testMqttBtn.disabled = false;
+            });
+            
+            mqttClient.on('error', (err) => {
+                log('MQTT错误: ' + err.message, 'error');
+                updateMqttStatus('连接失败', 'error');
+            });
+            
+            mqttClient.on('message', (topic, message) => {
+                const msgStr = message.toString();
+                console.log('=== 收到MQTT消息 ===');
+                console.log('主题:', topic);
+                console.log('消息长度:', msgStr.length);
+                console.log('完整消息:', msgStr);
+                log('收到MQTT消息，主题: ' + topic);
+                log('消息内容: ' + msgStr.substring(0, 100) + '...');
+                
+                // 立即处理信令
+                handleSignaling(msgStr);
+            });
+        });
+        
+        // 断开MQTT
+        disconnectBtn.addEventListener('click', () => {
+            if (mqttClient) {
+                mqttClient.end();
+                mqttClient = null;
+            }
+            
+            log('已断开MQTT连接');
+            updateMqttStatus('未连接', 'info');
+            
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            startVideoBtn.disabled = true;
+            testMqttBtn.disabled = true;
+        });
+        
+        // 开始捕获视频
+        startVideoBtn.addEventListener('click', async () => {
+            const sourceType = document.getElementById('videoSource').value;
+            
+            try {
+                log('正在获取视频流...');
+                
+                if (sourceType === 'screen') {
+                    // 屏幕共享（包含音频）
+                    log('⚠ 重要提示：请在弹出的对话框中勾选"共享音频"选项！', 'error');
+                    
+                    localStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { 
+                            cursor: 'always',
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 }
+                        },
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            sampleRate: 44100
+                        }
+                    });
+                    log('屏幕共享已启动', 'success');
+                    
+                    // 检查是否包含音频轨道
+                    const audioTracks = localStream.getAudioTracks();
+                    const videoTracks = localStream.getVideoTracks();
+                    
+                    log('=== 捕获结果 ===');
+                    log('视频轨道: ' + videoTracks.length, videoTracks.length > 0 ? 'success' : 'error');
+                    log('音频轨道: ' + audioTracks.length, audioTracks.length > 0 ? 'success' : 'error');
+                    
+                    if (audioTracks.length > 0) {
+                        log('✓ 已捕获音频: ' + audioTracks.length + ' 个音频轨道', 'success');
+                        audioTracks.forEach(track => {
+                            log('  音频: ' + track.label + ' (' + track.readyState + ')', 'success');
+                        });
+                    } else {
+                        log('✗ 未捕获音频！', 'error');
+                        log('原因：您在共享对话框中没有勾选音频选项', 'error');
+                        log('解决：点击"停止视频"，重新点击"开始捕获视频"，并勾选音频选项', 'error');
+                        alert('⚠ 警告：未捕获音频！\n\n请重新捕获并勾选以下选项：\n- 标签页共享：勾选"共享标签页音频"\n- 屏幕共享：勾选"共享系统音频"');
+                    }
+                } else if (sourceType === 'camera') {
+                    // 摄像头（包含音频）
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 1280, height: 720 },
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }
+                    });
+                    log('摄像头已启动', 'success');
+                    
+                    const audioTracks = localStream.getAudioTracks();
+                    const videoTracks = localStream.getVideoTracks();
+                    log('视频轨道: ' + videoTracks.length + ', 音频轨道: ' + audioTracks.length, 'success');
+                } else {
+                    // 测试视频（使用摄像头代替）
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: true,
+                        audio: true
+                    });
+                    log('测试视频已启动', 'success');
+                    
+                    const audioTracks = localStream.getAudioTracks();
+                    const videoTracks = localStream.getVideoTracks();
+                    log('视频轨道: ' + videoTracks.length + ', 音频轨道: ' + audioTracks.length, 'success');
+                }
+                
+                localVideo.srcObject = localStream;
+                
+                // 显示捕获的轨道信息
+                console.log('=== 捕获的轨道详情 ===');
+                localStream.getTracks().forEach(track => {
+                    console.log(`- ${track.kind}: ${track.label} (${track.readyState})`);
+                });
+                console.log('总轨道数:', localStream.getTracks().length);
+                
+                startVideoBtn.disabled = true;
+                stopVideoBtn.disabled = false;
+                
+            } catch (err) {
+                log('获取视频流失败: ' + err.message, 'error');
+                alert('获取视频流失败: ' + err.message);
+            }
+        });
+        
+        // 停止视频
+        stopVideoBtn.addEventListener('click', () => {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+                localVideo.srcObject = null;
+            }
+            
+            log('视频已停止');
+            startVideoBtn.disabled = false;
+            stopVideoBtn.disabled = true;
+        });
+        
+        // 处理WebRTC信令
+        async function handleSignaling(message) {
+            try {
+                console.log('--- 开始处理信令 ---');
+                const data = JSON.parse(message);
+                console.log('信令类型:', data.type);
+                console.log('设备名称:', data.deviceName);
+                console.log('当前设备:', deviceName);
+                
+                log('收到信令: ' + data.type);
+                
+                if (data.deviceName !== deviceName) {
+                    console.warn('设备名称不匹配，忽略信令');
+                    log('设备名称不匹配: ' + data.deviceName + ' != ' + deviceName, 'error');
+                    return;
+                }
+                
+                switch (data.type) {
+                    case 'offer':
+                        await handleOffer(data.offer);
+                        break;
+                    case 'ice-candidate':
+                        // 只处理来自前端的ICE候选（前端发送的candidate不会有from字段）
+                        if (!data.from || data.from === 'frontend') {
+                            await handleIceCandidate(data.candidate);
+                        } else {
+                            console.log('忽略自己发送的ICE候选');
+                        }
+                        break;
+                    case 'test':
+                        log('收到测试消息: ' + data.message, 'success');
+                        break;
+                }
+            } catch (err) {
+                log('处理信令失败: ' + err.message, 'error');
+                console.error('处理信令失败:', err);
+            }
+        }
+        
+        // 处理Offer
+        async function handleOffer(offer) {
+            log('处理Offer...');
+            updateWebRTCStatus('建立连接中...', 'info');
+            
+            // 创建PeerConnection
+            const configuration = {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    {
+                        urls: 'turn:openrelay.metered.ca:80',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    },
+                    {
+                        urls: 'turn:openrelay.metered.ca:443',
+                        username: 'openrelayproject',
+                        credential: 'openrelayproject'
+                    }
+                ]
+            };
+            
+            peerConnection = new RTCPeerConnection(configuration);
+            
+            // 添加本地流
+            if (localStream) {
+                log('准备添加本地视频流...');
+                console.log('本地流轨道数:', localStream.getTracks().length);
+                localStream.getTracks().forEach(track => {
+                    console.log('添加轨道:', track.kind, track.readyState, track.enabled);
+                    const sender = peerConnection.addTrack(track, localStream);
+                    console.log('轨道已添加，sender:', sender);
+                });
+                log('✓ 已添加本地视频流', 'success');
+            } else {
+                log('✗ 警告: 没有本地视频流', 'error');
+                alert('错误：没有本地视频流！请先点击"开始捕获视频"');
+            }
+            
+            // ICE候选
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    log('发送ICE候选到前端');
+                    sendSignaling({
+                        type: 'ice-candidate',
+                        deviceName: deviceName,
+                        candidate: event.candidate,
+                        from: 'device'  // 标识来自设备端
+                    });
+                }
+            };
+            
+            // 连接状态
+            peerConnection.onconnectionstatechange = () => {
+                const state = peerConnection.connectionState;
+                log('>>> 连接状态: ' + state);
+                console.log('>>> PeerConnection状态:', state);
+                console.log('>>> ICE连接状态:', peerConnection.iceConnectionState);
+                console.log('>>> ICE收集状态:', peerConnection.iceGatheringState);
+                
+                if (state === 'connected') {
+                    updateWebRTCStatus('已连接', 'success');
+                    log('✓ WebRTC连接成功！', 'success');
+                } else if (state === 'failed') {
+                    updateWebRTCStatus('连接失败', 'error');
+                    log('✗ WebRTC连接失败', 'error');
+                } else if (state === 'disconnected') {
+                    updateWebRTCStatus('连接断开', 'error');
+                    log('连接已断开', 'error');
+                }
+            };
+            
+            // ICE连接状态
+            peerConnection.oniceconnectionstatechange = () => {
+                const iceState = peerConnection.iceConnectionState;
+                log('>>> ICE连接状态: ' + iceState);
+                console.log('>>> ICE状态详情:', iceState);
+                
+                if (iceState === 'connected' || iceState === 'completed') {
+                    log('✓ ICE连接成功！', 'success');
+                } else if (iceState === 'failed') {
+                    log('✗ ICE连接失败 - 可能是网络或防火墙问题', 'error');
+                } else if (iceState === 'disconnected') {
+                    log('ICE连接断开', 'error');
+                }
+            };
+            
+            // 设置远程描述
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            
+            // 创建Answer
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            
+            // 发送Answer
+            log('准备发送Answer到前端');
+            sendSignaling({
+                type: 'answer',
+                deviceName: deviceName,
+                answer: answer,
+                from: 'device'  // 标识来自设备端
+            });
+            
+            log('✓ 已发送Answer', 'success');
+        }
+        
+        // 处理ICE候选
+        async function handleIceCandidate(candidate) {
+            if (peerConnection) {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                log('已添加ICE候选');
+            }
+        }
+        
+        // 发送信令
+        function sendSignaling(data) {
+            if (!mqttClient) {
+                log('MQTT未连接', 'error');
+                return;
+            }
+            
+            const topic = `webrtc/${username}/${deviceName}`;
+            mqttClient.publish(topic, JSON.stringify(data), { qos: 1 }, (err) => {
+                if (err) {
+                    log('发送信令失败: ' + err.message, 'error');
+                }
+            });
+        }
+        
+        // 清空日志
+        clearLogBtn.addEventListener('click', () => {
+            logBox.innerHTML = '<div class="log-entry">日志已清空</div>';
+        });
+        
+        // 测试MQTT通信
+        testMqttBtn.addEventListener('click', () => {
+            if (!mqttClient) {
+                log('MQTT未连接', 'error');
+                return;
+            }
+            
+            const topic = `webrtc/${username}/${deviceName}`;
+            const testMessage = JSON.stringify({
+                type: 'test',
+                deviceName: deviceName,
+                message: '这是一条测试消息',
+                timestamp: Date.now()
+            });
+            
+            log('发送测试消息到主题: ' + topic);
+            log('消息内容: ' + testMessage);
+            
+            mqttClient.publish(topic, testMessage, { qos: 1 }, (err) => {
+                if (err) {
+                    log('发送测试消息失败: ' + err.message, 'error');
+                } else {
+                    log('✓ 测试消息发送成功', 'success');
+                    log('如果前端收到此消息，说明MQTT通信正常');
+                }
+            });
+        });
+        
+        // 初始化
+        log('设备端模拟器已启动');
+        log('请按照步骤操作: 1.连接MQTT → 2.开始捕获视频 → 3.在前端点击投屏控制');
+    </script>
+</body>
+</html>

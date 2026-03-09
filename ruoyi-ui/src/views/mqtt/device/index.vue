@@ -263,6 +263,7 @@
             autoplay
             playsinline
             class="video-stream"
+            controls
           ></video>
           <div v-if="!isStreaming" class="stream-placeholder">
             <i class="el-icon-loading" v-if="screencastConnectionStatus === 'connecting'"></i>
@@ -399,7 +400,17 @@ export default {
       isMobile: false,
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
+        { urls: 'stun:stun1.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
       ],
       // 遮罩层
       loading: true,
@@ -540,9 +551,9 @@ export default {
 
               // 常见错误提示
               if (err.message && err.message.includes('ECONNREFUSED')) {
-                errorMsg = "连接被拒绝，请检查MQTT服务器地址和端口是否正确";
+                errorMsg = `连接被拒绝，请检查MQTT服务器地址和端口是否正确 (${mqttHost}:${mqttPort})`;
               } else if (err.message && err.message.includes('timeout')) {
-                errorMsg = "连接超时，请检查MQTT服务器是否开启WebSocket支持";
+                errorMsg = `连接超时，请检查MQTT服务器是否开启WebSocket支持 (${mqttHost}:${mqttPort})`;
               }
 
               this.$modal.msgError(errorMsg);
@@ -618,34 +629,65 @@ export default {
         `webrtc/${username}/#`
       ];
 
+      console.log('=== 开始订阅MQTT主题 ===');
       topics.forEach(topic => {
+        console.log('订阅主题:', topic);
         this.mqttClient.subscribe(topic, { qos: 1 }, (err) => {
           if (err) {
-            console.error('订阅主题失败:', topic, err);
+            console.error('✗ 订阅主题失败:', topic, err);
+          } else {
+            console.log('✓ 订阅主题成功:', topic);
           }
         });
       });
+      console.log('=== 主题订阅完成 ===');
     },
     /** 处理WebRTC信令 */
     async handleWebRTCSignaling(data) {
       const { type, deviceName } = data;
+      
+      console.log('<<< 收到WebRTC信令 ===');
+      console.log('<<< 信令类型:', type);
+      console.log('<<< 设备名称:', deviceName);
+      console.log('<<< 当前设备:', this.screencastDevice);
+      console.log('<<< 完整数据:', JSON.stringify(data).substring(0, 200) + '...');
 
-      if (deviceName !== this.screencastDevice) return;
+      if (deviceName !== this.screencastDevice) {
+        console.warn('⚠ 设备名称不匹配，忽略信令');
+        console.warn('期望:', this.screencastDevice, '实际:', deviceName);
+        return;
+      }
 
       try {
         switch (type) {
           case 'offer':
-            await this.handleOffer(data.offer);
+            // 前端是发起方，不应该处理Offer（忽略自己发送的）
+            console.log('>>> 收到Offer，但前端是发起方，忽略');
             break;
           case 'answer':
+            console.log('>>> 处理Answer...');
             await this.handleAnswer(data.answer);
             break;
           case 'ice-candidate':
-            await this.handleIceCandidate(data.candidate);
+            // 只处理来自设备端的ICE候选
+            if (!data.from || data.from === 'device') {
+              console.log('>>> 处理来自设备端的ICE候选...');
+              await this.handleIceCandidate(data.candidate);
+            } else {
+              console.log('>>> 忽略自己发送的ICE候选');
+            }
             break;
+          case 'test':
+            console.log('✓ 收到测试消息:', data.message);
+            this.$message.success('收到设备端测试消息: ' + data.message);
+            break;
+          default:
+            console.warn('未知的信令类型:', type);
         }
+        console.log('✓ 信令处理成功:', type);
       } catch (e) {
-        console.error('处理信令失败:', e);
+        console.error('✗ 处理信令失败:', e);
+        console.error('错误堆栈:', e.stack);
       }
     },
     /** 处理Offer */
@@ -664,21 +706,41 @@ export default {
     },
     /** 处理Answer */
     async handleAnswer(answer) {
+      console.log('>>> 开始设置远程描述（Answer）');
+      console.log('>>> Answer SDP长度:', answer.sdp ? answer.sdp.length : 0);
+      
       await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      
+      console.log('✓ 远程描述设置成功');
+      console.log('>>> 当前信令状态:', this.peerConnection.signalingState);
     },
     /** 处理ICE候选 */
     async handleIceCandidate(candidate) {
+      console.log('>>> 添加远程ICE候选');
+      console.log('>>> 候选类型:', candidate.candidate ? candidate.candidate.split(' ')[7] : 'unknown');
+      
       if (this.peerConnection) {
         await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('✓ ICE候选添加成功');
+      } else {
+        console.error('✗ PeerConnection不存在，无法添加ICE候选');
       }
     },
     /** 处理MQTT消息 */
     handleMqttMessage(topic, payload) {
       try {
+        console.log('=== 收到MQTT消息 ===');
+        console.log('主题:', topic);
+        console.log('消息长度:', payload.length);
+        
         const data = JSON.parse(payload);
         
+        console.log('消息类型:', data.type);
+        console.log('设备名称:', data.deviceName);
+        
         // 处理WebRTC信令消息
-        if (topic.includes('/webrtc/')) {
+        if (topic.includes('webrtc/')) {
+          console.log('>>> 这是WebRTC信令消息，转发处理');
           this.handleWebRTCSignaling(data);
           return;
         }
@@ -1123,6 +1185,11 @@ export default {
     },
     /** 弹窗打开时自动连接 */
     handleOpenScreencast() {
+      console.log('=== 开始投屏 ===');
+      console.log('设备名称:', this.screencastDevice);
+      console.log('MQTT连接状态:', this.isConnected);
+      console.log('用户名:', this.currentUsername);
+      
       this.screencastStatus = '正在连接...';
       this.screencastConnectionStatus = 'connecting';
       // 自动开始WebRTC连接
@@ -1237,42 +1304,126 @@ export default {
 
       this.peerConnection = new RTCPeerConnection(configuration);
 
+      // 添加视频接收器（重要！告诉对方我们想接收视频）
+      console.log('>>> 添加视频接收器...');
+      this.peerConnection.addTransceiver('video', { direction: 'recvonly' });
+      console.log('✓ 视频接收器已添加');
+
+      // 添加音频接收器
+      console.log('>>> 添加音频接收器...');
+      this.peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+      console.log('✓ 音频接收器已添加');
+
       // ICE候选事件
       this.peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log('>>> 生成ICE候选，准备发送');
           this.sendSignaling({
             type: 'ice-candidate',
             deviceName: this.screencastDevice,
-            candidate: event.candidate
+            candidate: event.candidate,
+            from: 'frontend'  // 标识来自前端
           });
+        } else {
+          console.log('>>> ICE候选收集完成');
         }
       };
 
       // 连接状态变化
       this.peerConnection.onconnectionstatechange = () => {
-        console.log('连接状态:', this.peerConnection.connectionState);
+        console.log('>>> PeerConnection状态变化:', this.peerConnection.connectionState);
+        console.log('>>> ICE连接状态:', this.peerConnection.iceConnectionState);
+        console.log('>>> ICE收集状态:', this.peerConnection.iceGatheringState);
+        
         if (this.peerConnection.connectionState === 'connected') {
           this.screencastConnectionStatus = 'connected';
           this.screencastStatus = '连接成功';
           this.$message.success('连接成功');
+          console.log('✓ WebRTC连接成功！');
         } else if (this.peerConnection.connectionState === 'failed' ||
                    this.peerConnection.connectionState === 'disconnected') {
           this.screencastConnectionStatus = 'disconnected';
           this.isStreaming = false;
           this.screencastStatus = '连接断开';
+          console.error('✗ WebRTC连接失败或断开');
+        }
+      };
+
+      // ICE连接状态变化
+      this.peerConnection.oniceconnectionstatechange = () => {
+        console.log('>>> ICE连接状态变化:', this.peerConnection.iceConnectionState);
+        
+        if (this.peerConnection.iceConnectionState === 'connected' || 
+            this.peerConnection.iceConnectionState === 'completed') {
+          console.log('✓ ICE连接成功！');
+        } else if (this.peerConnection.iceConnectionState === 'failed') {
+          console.error('✗ ICE连接失败 - 可能是NAT/防火墙问题');
+          this.$message.error('ICE连接失败，请检查网络配置');
+        } else if (this.peerConnection.iceConnectionState === 'disconnected') {
+          console.warn('⚠ ICE连接断开');
         }
       };
 
       // 接收远程流
       this.peerConnection.ontrack = (event) => {
-        console.log('接收到远程流');
-        this.remoteStream = event.streams[0];
-        this.$refs.remoteVideo.srcObject = this.remoteStream;
-        this.isStreaming = true;
-        this.screencastStatus = '正在播放';
+        console.log('!!! ✓ 接收到远程流事件触发 !!!');
+        console.log('事件对象:', event);
+        console.log('轨道类型:', event.track.kind);
+        console.log('流数量:', event.streams.length);
         
-        // 更新视频统计信息
-        this.updateVideoStats();
+        if (event.streams && event.streams.length > 0) {
+          console.log('流ID:', event.streams[0].id);
+          console.log('轨道数量:', event.streams[0].getTracks().length);
+          
+          const tracks = event.streams[0].getTracks();
+          console.log('轨道详情:');
+          tracks.forEach(track => {
+            console.log(`  - ${track.kind}: ${track.label} (${track.readyState}, enabled: ${track.enabled})`);
+          });
+          
+          // 检查音频轨道
+          const audioTracks = event.streams[0].getAudioTracks();
+          const videoTracks = event.streams[0].getVideoTracks();
+          console.log(`音频轨道: ${audioTracks.length}, 视频轨道: ${videoTracks.length}`);
+          
+          this.remoteStream = event.streams[0];
+          
+          console.log('设置视频元素srcObject...');
+          if (this.$refs.remoteVideo) {
+            this.$refs.remoteVideo.srcObject = this.remoteStream;
+            console.log('✓ 视频元素srcObject已设置');
+            
+            // 确保视频播放（包括音频）
+            this.$refs.remoteVideo.play().then(() => {
+              console.log('✓ 视频开始播放');
+              if (audioTracks.length > 0) {
+                console.log('✓ 音频应该也在播放');
+              } else {
+                console.warn('⚠ 没有音频轨道');
+              }
+            }).catch(err => {
+              console.error('✗ 视频播放失败:', err);
+            });
+          } else {
+            console.error('✗ 视频元素不存在！');
+          }
+          
+          this.isStreaming = true;
+          this.screencastStatus = '正在播放';
+          
+          if (audioTracks.length > 0 && videoTracks.length > 0) {
+            this.$message.success('视频和音频流已连接');
+          } else if (videoTracks.length > 0) {
+            this.$message.warning('视频流已连接，但没有音频');
+          } else {
+            this.$message.success('媒体流已连接');
+          }
+          
+          // 更新视频统计信息
+          this.updateVideoStats();
+        } else {
+          console.warn('⚠ 收到track事件但没有streams');
+        }
       };
 
       // DataChannel接收
@@ -1331,10 +1482,16 @@ export default {
       }
 
       const topic = `webrtc/${this.currentUsername}/${this.screencastDevice}`;
+      
+      console.log('>>> 发送信令:', data.type);
+      console.log('>>> 主题:', topic);
+      console.log('>>> 数据:', JSON.stringify(data).substring(0, 200) + '...');
 
       this.mqttClient.publish(topic, JSON.stringify(data), { qos: 1 }, (err) => {
         if (err) {
           console.error('发送信令失败:', err);
+        } else {
+          console.log('✓ 信令发送成功:', data.type);
         }
       });
     },
