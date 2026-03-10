@@ -29,38 +29,45 @@
         </div>
       </div>
 
-      <!-- 视频显示区 -->
-      <div class="video-container" @click="toggleFullscreen">
-        <video
-          ref="remoteVideo"
-          autoplay
-          playsinline
-          class="video-stream"
-          controls
-        ></video>
-        <div v-if="!isStreaming" class="stream-placeholder">
-          <i class="el-icon-loading" v-if="connectionStatus === 'connecting'"></i>
-          <i class="el-icon-video-camera" v-else></i>
-          <p>{{ statusText }}</p>
+      <!-- 主内容区 - 视频和功能栏并排 -->
+      <div class="main-content">
+        <!-- 视频显示区 -->
+        <div class="video-container" @click="toggleFullscreen">
+          <video
+            ref="remoteVideo"
+            autoplay
+            playsinline
+            class="video-stream"
+            controls
+          ></video>
+          <div v-if="!isStreaming" class="stream-placeholder">
+            <i class="el-icon-loading" v-if="connectionStatus === 'connecting'"></i>
+            <i class="el-icon-video-camera" v-else></i>
+            <p>{{ statusText }}</p>
+          </div>
         </div>
 
-        <!-- 右侧功能按钮 -->
-        <div class="side-controls">
-          <div class="control-item" @click.stop="sendVirtualKey('home')" :class="{ disabled: !isStreaming }">
-            <i class="el-icon-s-home"></i>
-            <span>主页</span>
-          </div>
-          <div class="control-item" @click.stop="sendVirtualKey('back')" :class="{ disabled: !isStreaming }">
-            <i class="el-icon-back"></i>
-            <span>返回</span>
-          </div>
-          <div class="control-item" @click.stop="captureScreenshot" :class="{ disabled: !isStreaming }">
+        <!-- 右侧功能栏 -->
+        <div class="side-toolbar">
+          <div class="toolbar-item" @click.stop="captureScreenshot" :class="{ disabled: !isStreaming }" title="截图">
             <i class="el-icon-picture"></i>
-            <span>截图</span>
           </div>
-          <div class="control-item" @click.stop="handleRefresh" :class="{ disabled: !isStreaming }">
+          <div class="toolbar-item" @click.stop="handleRefresh" :class="{ disabled: !isStreaming }" title="刷新">
             <i class="el-icon-refresh"></i>
-            <span>刷新</span>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="toolbar-divider"></div>
+
+          <!-- Android控制按钮 -->
+          <div class="toolbar-item" @click.stop="sendVirtualKey('back')" :class="{ disabled: !isStreaming }" title="返回">
+            <i class="el-icon-back"></i>
+          </div>
+          <div class="toolbar-item" @click.stop="sendVirtualKey('home')" :class="{ disabled: !isStreaming }" title="主页">
+            <i class="el-icon-s-home"></i>
+          </div>
+          <div class="toolbar-item" @click.stop="sendVirtualKey('menu')" :class="{ disabled: !isStreaming }" title="任务栏">
+            <i class="el-icon-menu"></i>
           </div>
         </div>
       </div>
@@ -77,24 +84,24 @@
             <el-option label="高清 (1080p@60fps)" value="high" />
           </el-select>
         </div>
-        
+
         <div class="stats-divider"></div>
-        
+
         <!-- 自定义设置 -->
         <div class="setting-section-title">自定义设置</div>
         <div class="setting-item">
           <span>分辨率</span>
-          <el-input 
-            v-model="videoConstraints.resolution" 
-            size="mini" 
+          <el-input
+            v-model="videoConstraints.resolution"
+            size="mini"
             :disabled="currentQuality === 'auto'"
             placeholder="如: 1920x1080"
           />
         </div>
         <div class="setting-item">
           <span>帧率</span>
-          <el-select 
-            v-model="videoConstraints.frameRate" 
+          <el-select
+            v-model="videoConstraints.frameRate"
             size="mini"
             :disabled="currentQuality === 'auto'"
           >
@@ -103,15 +110,15 @@
           </el-select>
         </div>
         <div class="setting-item" v-if="currentQuality !== 'auto'">
-          <el-button 
-            type="primary" 
-            size="mini" 
+          <el-button
+            type="primary"
+            size="mini"
             style="width: 100%"
             @click="applyVideoSettings"
             :disabled="!isStreaming"
           >应用设置</el-button>
         </div>
-        
+
         <!-- 统计信息 -->
         <div class="stats-divider"></div>
         <div class="stats-section">
@@ -191,7 +198,7 @@ export default {
       statusText: '等待连接...',
       isStreaming: false,
       showSettings: false,
-      
+
       // 拖动和缩放相关
       dialogWidth: 420,
       dialogHeight: 700,
@@ -206,10 +213,10 @@ export default {
       resizeStartY: 0,
       resizeStartWidth: 0,
       resizeStartHeight: 0,
-      
+
       // WebRTC 管理器
       webrtcManager: null,
-      
+
       // 统计信息监控
       statsInterval: null,
       currentStats: {
@@ -220,12 +227,12 @@ export default {
         jitter: 0,
         rtt: 0
       },
-      
+
       videoConstraints: {
         resolution: 'auto', // 改为自动，从设备获取
         frameRate: 60 // 提高默认帧率到60
       },
-      
+
       // 质量预设
       qualityPresets: {
         low: { resolution: '640x480', frameRate: 30, label: '流畅' },
@@ -234,7 +241,7 @@ export default {
         auto: { resolution: 'auto', frameRate: 60, label: '自动' }
       },
       currentQuality: 'auto',
-      
+
       isMobile: false
     };
   },
@@ -265,11 +272,11 @@ export default {
         mqttClient: this.mqttClient,
         username: this.username
       });
-      
+
       // 设置事件回调
       this.webrtcManager.on('connectionStateChange', (state) => {
         this.connectionStatus = state;
-        
+
         if (state === 'connected') {
           this.statusText = '连接成功';
           this.$message.success('连接成功');
@@ -278,58 +285,58 @@ export default {
           this.statusText = '连接断开';
         }
       });
-      
+
       this.webrtcManager.on('track', (stream, { audioTracks, videoTracks }) => {
         console.log('设置视频元素srcObject...');
         if (this.$refs.remoteVideo) {
           const video = this.$refs.remoteVideo;
-          
+
           // 检查是否是同一个流，如果不是则更新
           if (!video.srcObject || video.srcObject.id !== stream.id) {
             console.log('设置新的视频流，流ID:', stream.id);
-            
+
             // 设置视频源
             video.srcObject = stream;
-            
+
             // 优化视频播放设置 - 降低延迟
             video.playsInline = true;
             video.muted = false; // 启用音频
             video.autoplay = true;
-            
+
             // 设置低延迟属性
             if (video.hasAttribute) {
               video.setAttribute('playsinline', '');
               video.setAttribute('webkit-playsinline', '');
             }
-            
+
             // 关键：设置视频缓冲区为最小值以降低延迟
             try {
               // 尝试设置 latencyHint（Chrome 支持）
               if ('latencyHint' in video) {
                 video.latencyHint = 0; // 最低延迟
               }
-              
+
               // 设置预加载策略
               video.preload = 'auto';
-              
+
               // 禁用画中画
               video.disablePictureInPicture = true;
-              
+
               // 设置控制条（可选）
               video.controls = false;
             } catch (err) {
               console.warn('部分视频属性设置失败:', err);
             }
-            
+
             console.log('✓ 视频元素srcObject已设置');
-            
+
             // 播放视频
             video.play().then(() => {
               console.log('✓ 视频开始播放');
-              
+
               // 尝试进入低延迟模式
               this.enableLowLatencyMode(video);
-              
+
               // 启动统计信息监控
               this.startStatsMonitoring();
             }).catch(err => {
@@ -343,17 +350,17 @@ export default {
             console.log('视频元素已有相同流，跳过重复设置');
           }
         }
-        
+
         this.isStreaming = true;
         this.statusText = '正在播放';
-        
+
         if (audioTracks.length > 0 && videoTracks.length > 0) {
           this.$message.success('视频和音频流已连接');
         } else if (videoTracks.length > 0) {
           this.$message.warning('视频流已连接，但没有音频');
         }
       });
-      
+
       this.webrtcManager.on('dataChannelMessage', (message) => {
         switch (message.type) {
           case 'status':
@@ -363,47 +370,47 @@ export default {
             break;
         }
       });
-      
+
       this.webrtcManager.on('error', (error) => {
         this.$message.error(error);
       });
     },
-    
+
     /** 检测移动设备 */
     checkMobile() {
       this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     },
-    
+
     /** 弹窗打开时自动连接 */
     handleOpen() {
       console.log('=== 开始投屏 ===');
       console.log('设备名称:', this.deviceName);
       console.log('MQTT连接状态:', !!this.mqttClient);
       console.log('用户名:', this.username);
-      
+
       // 更新 WebRTC 管理器配置
       this.webrtcManager.updateConfig({
         deviceName: this.deviceName,
         mqttClient: this.mqttClient,
         username: this.username
       });
-      
+
       this.statusText = '正在连接...';
       this.connectionStatus = 'connecting';
       this.startScreencast();
     },
-    
+
     /** 关闭弹窗 */
     handleClose() {
       this.stopScreencast();
       this.cleanup();
     },
-    
+
     /** 关闭对话框 */
     closeDialog() {
       this.visible = false;
     },
-    
+
     /** 开始投屏 */
     async startScreencast() {
       if (!this.mqttClient) {
@@ -414,7 +421,7 @@ export default {
       try {
         this.connectionStatus = 'connecting';
         this.statusText = '正在建立连接...';
-        
+
         // 准备视频约束
         let constraints = null;
         if (this.videoConstraints.resolution !== 'auto') {
@@ -434,7 +441,7 @@ export default {
             frameRate: 60
           };
         }
-        
+
         await this.webrtcManager.start(constraints);
         this.$message.success('正在建立连接...');
       } catch (e) {
@@ -444,7 +451,7 @@ export default {
         this.statusText = '连接失败';
       }
     },
-    
+
     /** 停止投屏 */
     stopScreencast() {
       if (this.webrtcManager) {
@@ -454,31 +461,31 @@ export default {
       this.connectionStatus = 'disconnected';
       this.isStreaming = false;
       this.statusText = '已停止';
-      
+
       // 清除视频元素
       if (this.$refs.remoteVideo) {
         this.$refs.remoteVideo.srcObject = null;
       }
     },
-    
+
     /** 启动统计信息监控 */
     startStatsMonitoring() {
       if (this.statsInterval) {
         clearInterval(this.statsInterval);
       }
-      
+
       // 用于计算比特率的变量
       let lastBytesReceived = 0;
       let lastTimestamp = 0;
-      
+
       this.statsInterval = setInterval(async () => {
         if (!this.webrtcManager || !this.webrtcManager.peerConnection) {
           return;
         }
-        
+
         try {
           const stats = await this.webrtcManager.peerConnection.getStats();
-          
+
           stats.forEach(report => {
             // 视频统计
             if (report.type === 'inbound-rtp' && report.kind === 'video') {
@@ -488,10 +495,10 @@ export default {
                 const bytesDiff = report.bytesReceived - lastBytesReceived;
                 this.currentStats.bitrate = Math.round((bytesDiff * 8) / timeDiff / 1000); // kbps
               }
-              
+
               lastBytesReceived = report.bytesReceived;
               lastTimestamp = report.timestamp;
-              
+
               // 帧率
               if (report.framesPerSecond !== undefined) {
                 this.currentStats.fps = Math.round(report.framesPerSecond);
@@ -499,17 +506,17 @@ export default {
                 // 备用方案：通过解码帧数计算
                 this.currentStats.fps = Math.round(report.framesDecoded / ((report.timestamp - lastTimestamp) / 1000));
               }
-              
+
               // 分辨率
               if (report.frameWidth && report.frameHeight) {
                 this.currentStats.resolution = `${report.frameWidth}x${report.frameHeight}`;
-                
+
                 // 自动更新分辨率显示
                 if (this.videoConstraints.resolution === 'auto') {
                   this.videoConstraints.resolution = this.currentStats.resolution;
                 }
               }
-              
+
               // 丢包率
               if (report.packetsLost !== undefined && report.packetsReceived !== undefined) {
                 const totalPackets = report.packetsLost + report.packetsReceived;
@@ -517,13 +524,13 @@ export default {
                   this.currentStats.packetLoss = ((report.packetsLost / totalPackets) * 100).toFixed(2);
                 }
               }
-              
+
               // 抖动
               if (report.jitter !== undefined) {
                 this.currentStats.jitter = Math.round(report.jitter * 1000); // 转换为毫秒
               }
             }
-            
+
             // RTT (往返时间) - 修复延迟统计
             if (report.type === 'remote-inbound-rtp' && report.kind === 'video') {
               // 使用 remote-inbound-rtp 的 roundTripTime
@@ -531,7 +538,7 @@ export default {
                 this.currentStats.rtt = Math.round(report.roundTripTime * 1000); // 转换为毫秒
               }
             }
-            
+
             // 备用方案：从 candidate-pair 获取 RTT
             if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
               if (report.currentRoundTripTime !== undefined && report.currentRoundTripTime > 0) {
@@ -541,7 +548,7 @@ export default {
                 }
               }
             }
-            
+
             // 另一个备用方案：从 transport 获取
             if (report.type === 'transport') {
               if (report.selectedCandidatePairId) {
@@ -549,7 +556,7 @@ export default {
               }
             }
           });
-          
+
           // 如果延迟过高，自动调整质量
           if (this.currentStats.rtt > 200 || this.currentStats.packetLoss > 5) {
             console.warn('检测到高延迟或丢包，建议降低视频质量');
@@ -559,7 +566,7 @@ export default {
         }
       }, 1000); // 每秒更新一次
     },
-    
+
     /** 停止统计信息监控 */
     stopStatsMonitoring() {
       if (this.statsInterval) {
@@ -567,7 +574,7 @@ export default {
         this.statsInterval = null;
       }
     },
-    
+
     /** 启用低延迟模式 */
     enableLowLatencyMode(videoElement) {
       try {
@@ -575,20 +582,20 @@ export default {
         if (videoElement.captureStream) {
           console.log('✓ 视频元素支持 captureStream');
         }
-        
+
         // 监听缓冲事件，动态调整
         videoElement.addEventListener('waiting', () => {
           console.log('视频缓冲中...');
         });
-        
+
         videoElement.addEventListener('playing', () => {
           console.log('视频播放中');
-          
+
           // 尝试减少缓冲区
           if (videoElement.buffered && videoElement.buffered.length > 0) {
             const buffered = videoElement.buffered.end(0) - videoElement.currentTime;
             console.log('当前缓冲:', buffered.toFixed(2), '秒');
-            
+
             // 如果缓冲超过 0.5 秒，尝试跳到最新帧
             if (buffered > 0.5) {
               videoElement.currentTime = videoElement.buffered.end(0) - 0.1;
@@ -596,44 +603,44 @@ export default {
             }
           }
         });
-        
+
         // 定期检查并跳到最新帧（激进的低延迟策略）
         const latencyCheckInterval = setInterval(() => {
           if (!this.isStreaming) {
             clearInterval(latencyCheckInterval);
             return;
           }
-          
+
           if (videoElement.buffered && videoElement.buffered.length > 0) {
             const buffered = videoElement.buffered.end(0) - videoElement.currentTime;
-            
+
             // 如果缓冲超过 0.3 秒，跳到最新帧
             if (buffered > 0.3) {
               videoElement.currentTime = videoElement.buffered.end(0) - 0.05;
             }
           }
         }, 1000); // 每秒检查一次
-        
+
         console.log('✓ 低延迟模式已启用');
       } catch (err) {
         console.warn('启用低延迟模式失败:', err);
       }
     },
-    
+
     /** 处理 Answer */
     async handleAnswer(answer) {
       if (this.webrtcManager) {
         await this.webrtcManager.handleAnswer(answer);
       }
     },
-    
+
     /** 处理 ICE 候选 */
     async handleIceCandidate(candidate) {
       if (this.webrtcManager) {
         await this.webrtcManager.handleIceCandidate(candidate);
       }
     },
-    
+
     /** 发送虚拟按键 */
     sendVirtualKey(key) {
       if (!this.webrtcManager || !this.webrtcManager.isDataChannelOpen()) {
@@ -642,14 +649,15 @@ export default {
       }
 
       this.webrtcManager.sendVirtualKey(key);
-      
+
       const keyNames = {
         'home': '主页',
-        'back': '返回'
+        'back': '返回',
+        'menu': '任务栏'
       };
       this.$message.success(`已发送${keyNames[key] || key}按键`);
     },
-    
+
     /** 请求屏幕共享 */
     requestScreenShare() {
       if (!this.webrtcManager || !this.webrtcManager.isDataChannelOpen()) {
@@ -660,33 +668,33 @@ export default {
       this.webrtcManager.requestScreenShare();
       this.$message.success('已发送屏幕共享请求');
     },
-    
+
     /** 刷新连接 */
     async handleRefresh() {
       if (!this.isStreaming) {
         this.$message.warning('当前没有活动连接');
         return;
       }
-      
+
       try {
         this.$message.info('正在刷新连接...');
-        
+
         // 停止当前连接
         this.stopScreencast();
-        
+
         // 等待一小段时间确保资源释放
         await new Promise(resolve => setTimeout(resolve, 500));
-        
+
         // 重新开始投屏
         await this.startScreencast();
-        
+
         this.$message.success('连接已刷新');
       } catch (error) {
         console.error('刷新连接失败:', error);
         this.$message.error('刷新连接失败: ' + error.message);
       }
     },
-    
+
     /** 应用视频设置 */
     async applyVideoSettings() {
       if (!this.webrtcManager || !this.webrtcManager.peerConnection) {
@@ -723,21 +731,21 @@ export default {
           height: height,
           frameRate: this.videoConstraints.frameRate
         });
-        
+
         this.$message.success(`正在应用新设置: ${width}x${height}@${this.videoConstraints.frameRate}fps，请等待设备响应...`);
       } catch (error) {
         console.error('应用视频设置失败:', error);
         this.$message.error('应用视频设置失败: ' + error.message);
       }
     },
-    
+
     /** 应用质量预设 */
     applyQualityPreset() {
       const preset = this.qualityPresets[this.currentQuality];
       if (preset) {
         this.videoConstraints.resolution = preset.resolution;
         this.videoConstraints.frameRate = preset.frameRate;
-        
+
         // 如果不是自动模式，立即应用设置
         if (this.currentQuality !== 'auto') {
           this.applyVideoSettings();
@@ -746,7 +754,7 @@ export default {
         }
       }
     },
-    
+
     /** 获取延迟等级样式 */
     getLatencyClass() {
       const rtt = this.currentStats.rtt;
@@ -756,7 +764,7 @@ export default {
       if (rtt < 200) return 'latency-fair';
       return 'latency-poor';
     },
-    
+
     /** 获取帧率等级样式 */
     getFpsClass() {
       const fps = this.currentStats.fps;
@@ -766,7 +774,7 @@ export default {
       if (fps >= 30) return 'fps-fair';
       return 'fps-poor';
     },
-    
+
     /** 获取期望的分辨率 */
     getExpectedResolution() {
       if (this.videoConstraints.resolution === 'auto') {
@@ -774,7 +782,7 @@ export default {
       }
       return this.videoConstraints.resolution;
     },
-    
+
     /** 检查分辨率是否匹配 */
     isResolutionMatched() {
       if (!this.currentStats.resolution || this.videoConstraints.resolution === 'auto') {
@@ -782,13 +790,13 @@ export default {
       }
       return this.currentStats.resolution === this.videoConstraints.resolution;
     },
-    
+
     /** 全屏切换 */
     toggleFullscreen() {
       if (!this.isStreaming) {
         return;
       }
-      
+
       const video = this.$refs.remoteVideo;
 
       if (!document.fullscreenElement) {
@@ -809,7 +817,7 @@ export default {
         }
       }
     },
-    
+
     /** 截图 */
     captureScreenshot() {
       const video = this.$refs.remoteVideo;
@@ -835,46 +843,46 @@ export default {
         this.$message.success('截图已保存');
       });
     },
-    
+
     /** 开始拖动 */
     startDrag(e) {
       if (this.isMobile) return;
-      
+
       this.isDragging = true;
       this.dragStartX = e.clientX;
       this.dragStartY = e.clientY;
-      
+
       const dialog = document.querySelector('.screencast-control-dialog');
       if (dialog) {
         const rect = dialog.getBoundingClientRect();
         this.dialogLeft = rect.left;
         this.dialogTop = rect.top;
       }
-      
+
       e.preventDefault();
     },
-    
+
     /** 开始缩放 */
     startResize(e, type) {
       if (this.isMobile) return;
-      
+
       this.isResizing = true;
       this.resizeType = type;
       this.resizeStartX = e.clientX;
       this.resizeStartY = e.clientY;
       this.resizeStartWidth = this.dialogWidth;
       this.resizeStartHeight = this.dialogHeight;
-      
+
       e.preventDefault();
       e.stopPropagation();
     },
-    
+
     /** 鼠标移动 */
     handleMouseMove(e) {
       if (this.isDragging) {
         const deltaX = e.clientX - this.dragStartX;
         const deltaY = e.clientY - this.dragStartY;
-        
+
         const dialog = document.querySelector('.screencast-control-dialog');
         if (dialog) {
           dialog.style.left = (this.dialogLeft + deltaX) + 'px';
@@ -884,36 +892,36 @@ export default {
       } else if (this.isResizing) {
         const deltaX = e.clientX - this.resizeStartX;
         const deltaY = e.clientY - this.resizeStartY;
-        
+
         if (this.resizeType === 'right' || this.resizeType === 'corner') {
           this.dialogWidth = Math.max(300, this.resizeStartWidth + deltaX);
         }
-        
+
         if (this.resizeType === 'bottom' || this.resizeType === 'corner') {
           this.dialogHeight = Math.max(400, this.resizeStartHeight + deltaY);
         }
       }
     },
-    
+
     /** 鼠标释放 */
     handleMouseUp() {
       this.isDragging = false;
       this.isResizing = false;
       this.resizeType = '';
     },
-    
+
     /** 清理资源 */
     cleanup() {
       this.stopStatsMonitoring();
-      
+
       if (this.webrtcManager) {
         this.webrtcManager.cleanup();
       }
-      
+
       if (this.$refs.remoteVideo) {
         this.$refs.remoteVideo.srcObject = null;
       }
-      
+
       this.isStreaming = false;
     }
   }
@@ -928,6 +936,13 @@ export default {
   background: #000;
   display: flex;
   flex-direction: column;
+}
+
+/* 主内容区 - 视频和功能栏并排 */
+.main-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
 
 /* 顶部工具栏 */
@@ -1089,48 +1104,62 @@ export default {
   opacity: 0.6;
 }
 
-/* 右侧控制按钮 */
-.side-controls {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+/* 右侧功能栏 */
+.side-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  z-index: 10;
+  width: 40px;
+  background: rgba(20, 20, 20, 0.98);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
-.control-item {
+.toolbar-divider {
+  flex: 1;
+  min-height: 1px;
+  background: transparent;
+  margin: 0;
+}
+
+.toolbar-item {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 50px;
-  height: 50px;
-  background: rgba(0, 0, 0, 0.6);
+  height: 40px;
   color: #fff;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
   user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
 }
 
-.control-item:hover:not(.disabled) {
-  background: rgba(0, 0, 0, 0.8);
+.toolbar-item:last-child {
+  border-bottom: none;
 }
 
-.control-item.disabled {
-  opacity: 0.4;
+.toolbar-item:hover:not(.disabled) {
+  background: rgba(64, 158, 255, 0.15);
+}
+
+.toolbar-item:hover:not(.disabled)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #409EFF;
+}
+
+.toolbar-item.disabled {
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
-.control-item i {
-  font-size: 20px;
-  margin-bottom: 2px;
-}
-
-.control-item span {
-  font-size: 10px;
+.toolbar-item i {
+  font-size: 16px;
 }
 
 /* 设置面板 */
@@ -1218,37 +1247,55 @@ export default {
     height: 100vh;
     max-height: none;
   }
-  
+
   .top-toolbar {
     padding: 10px 12px;
   }
-  
+
   .device-name {
     font-size: 13px;
   }
-  
+
   .toolbar-actions i {
     font-size: 16px;
   }
-  
-  .side-controls {
-    right: 8px;
-    gap: 15px;
+
+  .main-content {
+    flex-direction: column;
   }
-  
-  .control-item {
-    width: 45px;
-    height: 45px;
+
+  .side-toolbar {
+    width: 100%;
+    flex-direction: row;
+    height: 60px;
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
-  
-  .control-item i {
-    font-size: 18px;
+
+  .toolbar-item {
+    flex: 1;
+    height: 100%;
+    border-bottom: none;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
   }
-  
-  .control-item span {
-    font-size: 9px;
+
+  .toolbar-item:last-child {
+    border-right: none;
   }
-  
+
+  .toolbar-item:hover:not(.disabled)::before {
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: auto;
+    width: auto;
+    height: 3px;
+  }
+
+  .toolbar-item i {
+    font-size: 16px;
+  }
+
   .settings-panel {
     top: 45px;
     right: 8px;
