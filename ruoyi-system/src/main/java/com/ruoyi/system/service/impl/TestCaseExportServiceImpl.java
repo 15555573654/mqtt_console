@@ -456,6 +456,12 @@ public class TestCaseExportServiceImpl implements ITestCaseExportService
             String trimmed = line.trim();
             if (trimmed.isEmpty()) continue;
             
+            // 忽略 # 一级标题（已经有根标题 caseTitle）
+            if (trimmed.startsWith("# ") && !trimmed.startsWith("## ")) 
+            {
+                continue;
+            }
+            
             // 标准 Markdown 标题
             if (trimmed.startsWith("## ") && !trimmed.startsWith("### ")) 
             {
@@ -501,13 +507,6 @@ public class TestCaseExportServiceImpl implements ITestCaseExportService
                     Element topic = createTopic(doc, "n" + topicId++, trimmed.substring(7).trim());
                     children.appendChild(topic);
                 }
-                continue;
-            } 
-            else if (trimmed.startsWith("# ") && !trimmed.startsWith("## ")) 
-            {
-                Element topic = createTopic(doc, "n" + topicId++, trimmed.substring(2).trim());
-                parent.appendChild(topic);
-                moduleNode = testPointNode = verifyPointNode = scenarioNode = null;
                 continue;
             }
             

@@ -332,6 +332,11 @@ export default {
         line = line.trim();
         if (!line) continue;
 
+        // 忽略 # 一级标题（已经有根标题 title）
+        if (line.startsWith('# ') && !line.startsWith('## ')) {
+          continue;
+        }
+
         // 标准 Markdown 标题
         if (line.startsWith('## ')) {
           moduleNode = { id: 'n' + id++, topic: line.substring(3).trim(), children: [] };
@@ -360,10 +365,6 @@ export default {
           if (parent) {
             parent.children.push({ id: 'n' + id++, topic: line.substring(7).trim() });
           }
-          continue;
-        } else if (line.startsWith('# ')) {
-          root.children.push({ id: 'n' + id++, topic: line.substring(2).trim(), children: [] });
-          moduleNode = testPointNode = verifyPointNode = scenarioNode = null;
           continue;
         }
 
