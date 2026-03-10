@@ -211,12 +211,18 @@ public class TestCaseController extends BaseController
 
             String csvContent = testCaseExportService.exportToCsv(testCase.getCaseContent());
             
-            response.setContentType("text/csv");
+            // 检查csvContent是否为空或只有表头
+            if (csvContent == null || csvContent.trim().isEmpty() || csvContent.split("\n").length <= 1)
+            {
+                log.warn("CSV内容为空，用例ID: {}", caseId);
+            }
+            
+            response.setContentType("text/csv; charset=UTF-8");
             response.setCharacterEncoding("UTF-8");
             response.setHeader("Content-Disposition", 
                 "attachment; filename=" + java.net.URLEncoder.encode(testCase.getCaseTitle() + ".csv", "UTF-8"));
             
-            response.getWriter().write("\uFEFF"); // UTF-8 BOM
+            // BOM已在exportToCsv中添加，不需要重复添加
             response.getWriter().write(csvContent);
             response.getWriter().flush();
         }
