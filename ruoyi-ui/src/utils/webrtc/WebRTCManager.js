@@ -8,10 +8,15 @@ export default class WebRTCManager {
     this.mqttClient = options.mqttClient || null;
     this.username = options.username || '';
     
-    // ICE 服务器配置
+    // ICE 服务器配置 - 优化版本
     this.iceServers = options.iceServers || [
+      // Google STUN 服务器
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // 公共 TURN 服务器（用于 NAT 穿透）
       {
         urls: 'turn:openrelay.metered.ca:80',
         username: 'openrelayproject',
@@ -19,6 +24,11 @@ export default class WebRTCManager {
       },
       {
         urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
         username: 'openrelayproject',
         credential: 'openrelayproject'
       }
@@ -31,6 +41,9 @@ export default class WebRTCManager {
     
     // 状态
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
+    
+    // 自适应质量调整
+    this.qualityAdjustmentInterval = null;
     
     // 事件回调
     this.callbacks = {
@@ -65,19 +78,37 @@ export default class WebRTCManager {
    */
   async createPeerConnection() {
     const configuration = {
-      iceServers: this.iceServers
+      iceServers: this.iceServers,
+      // 优化 ICE 候选策略
+      iceTransportPolicy: 'all', // 使用所有可用的候选
+      bundlePolicy: 'max-bundle', // 最大化复用传输
+      rtcpMuxPolicy: 'require' // 要求 RTCP 复用
     };
     
     this.peerConnection = new RTCPeerConnection(configuration);
     
-    // 添加视频接收器
+    // 添加视频接收器，配置优化参数
     console.log('>>> 添加视频接收器...');
-    this.peerConnection.addTransceiver('video', { direction: 'recvonly' });
+    const videoTransceiver = this.peerConnection.addTransceiver('video', { 
+      direction: 'recvonly'
+    });
+    
+    // 设置视频接收参数以降低延迟
+    if (videoTransceiver.receiver && videoTransceiver.receiver.playoutDelayHint !== undefined) {
+      videoTransceiver.receiver.playoutDelayHint = 0; // 最小化播放延迟
+    }
     console.log('✓ 视频接收器已添加');
     
     // 添加音频接收器
     console.log('>>> 添加音频接收器...');
-    this.peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+    const audioTransceiver = this.peerConnection.addTransceiver('audio', { 
+      direction: 'recvonly'
+    });
+    
+    // 设置音频接收参数以降低延迟
+    if (audioTransceiver.receiver && audioTransceiver.receiver.playoutDelayHint !== undefined) {
+      audioTransceiver.receiver.playoutDelayHint = 0; // 最小化播放延迟
+    }
     console.log('✓ 音频接收器已添加');
     
     // ICE 候选事件
@@ -138,6 +169,20 @@ export default class WebRTCManager {
         console.log(`音频轨道: ${audioTracks.length}, 视频轨道: ${videoTracks.length}`);
         
         this.remoteStream = event.streams[0];
+        
+        // 优化视频轨道设置
+        videoTracks.forEach(track => {
+          // 请求高质量视频
+          if (track.applyConstraints) {
+            track.applyConstraints({
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30 }
+            }).catch(err => {
+              console.warn('应用视频约束失败:', err);
+            });
+          }
+        });
         
         if (this.callbacks.onTrack) {
           this.callbacks.onTrack(this.remoteStream, { audioTracks, videoTracks });
@@ -234,8 +279,19 @@ export default class WebRTCManager {
       // 创建 DataChannel
       this.createDataChannel();
       
-      // 创建 Offer
-      const offer = await this.peerConnection.createOffer();
+      // 创建 Offer，配置优化参数
+      const offerOptions = {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        // 启用 ICE 重启
+        iceRestart: false
+      };
+      
+      const offer = await this.peerConnection.createOffer(offerOptions);
+      
+      // 修改 SDP 以优化视频质量和延迟
+      offer.sdp = this.optimizeSDP(offer.sdp);
+      
       await this.peerConnection.setLocalDescription(offer);
       
       // 通过 MQTT 发送 Offer
@@ -244,6 +300,9 @@ export default class WebRTCManager {
         deviceName: this.deviceName,
         offer: offer
       });
+      
+      // 启动自适应质量调整（每 5 秒检查一次）
+      this.startQualityAdjustment();
       
       return true;
     } catch (error) {
@@ -254,6 +313,130 @@ export default class WebRTCManager {
       }
       throw error;
     }
+  }
+  
+  /**
+   * 优化 SDP 以提高视频质量和降低延迟
+   */
+  optimizeSDP(sdp) {
+    let optimizedSDP = sdp;
+    
+    // 设置视频编码参数
+    // 1. 大幅提高最大比特率以支持高帧率
+    optimizedSDP = optimizedSDP.replace(
+      /(m=video.*\r\n)/g,
+      '$1b=AS:10000\r\n' // 设置最大带宽为 10000 kbps（10Mbps）以支持高帧率
+    );
+    
+    // 2. 添加 TIAS (Transport Independent Application Specific Maximum) 带宽限制
+    optimizedSDP = optimizedSDP.replace(
+      /(b=AS:10000\r\n)/g,
+      '$1b=TIAS:10000000\r\n' // 10 Mbps in bits per second
+    );
+    
+    // 3. 优先使用 H.264 编码（更好的硬件支持和质量）
+    const h264Regex = /a=rtpmap:(\d+) H264\/90000/;
+    const h264Match = optimizedSDP.match(h264Regex);
+    if (h264Match) {
+      const h264PayloadType = h264Match[1];
+      
+      // 设置 H.264 高质量高帧率编码参数
+      const h264FmtpRegex = new RegExp(`a=fmtp:${h264PayloadType} (.*)`, 'g');
+      if (optimizedSDP.match(h264FmtpRegex)) {
+        optimizedSDP = optimizedSDP.replace(
+          h264FmtpRegex,
+          // 提高 max-mbps 以支持 60fps
+          `a=fmtp:${h264PayloadType} level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;max-mbps=432000;max-fs=8192;max-br=10000`
+        );
+      } else {
+        optimizedSDP = optimizedSDP.replace(
+          h264Regex,
+          `$&\r\na=fmtp:${h264PayloadType} level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f;max-mbps=432000;max-fs=8192;max-br=10000`
+        );
+      }
+      
+      // 将 H.264 移到编码列表的最前面（提高优先级）
+      const mLineRegex = /m=video \d+ [^\r\n]+/;
+      const mLineMatch = optimizedSDP.match(mLineRegex);
+      if (mLineMatch) {
+        const mLine = mLineMatch[0];
+        const payloadTypes = mLine.split(' ').slice(3);
+        
+        // 将 H.264 payload type 移到最前面
+        const reorderedTypes = [h264PayloadType, ...payloadTypes.filter(pt => pt !== h264PayloadType)];
+        const newMLine = mLine.split(' ').slice(0, 3).join(' ') + ' ' + reorderedTypes.join(' ');
+        
+        optimizedSDP = optimizedSDP.replace(mLineRegex, newMLine);
+      }
+    }
+    
+    // 4. 禁用 RTX（重传）以降低延迟
+    optimizedSDP = optimizedSDP.replace(/a=rtpmap:\d+ rtx\/90000\r\n/g, '');
+    optimizedSDP = optimizedSDP.replace(/a=fmtp:\d+ apt=\d+\r\n/g, '');
+    
+    // 5. 禁用 FEC（前向纠错）以降低延迟
+    optimizedSDP = optimizedSDP.replace(/a=rtpmap:\d+ (red|ulpfec)\/90000\r\n/g, '');
+    
+    // 6. 设置音频编码参数
+    optimizedSDP = optimizedSDP.replace(
+      /(m=audio.*\r\n)/g,
+      '$1b=AS:128\r\n' // 设置音频带宽为 128 kbps
+    );
+    
+    // 7. 优先使用 Opus 编码
+    const opusRegex = /a=rtpmap:(\d+) opus\/48000\/2/;
+    const opusMatch = optimizedSDP.match(opusRegex);
+    if (opusMatch) {
+      const opusPayloadType = opusMatch[1];
+      
+      // 设置 Opus 低延迟高质量参数
+      const opusFmtpRegex = new RegExp(`a=fmtp:${opusPayloadType} (.*)`, 'g');
+      if (optimizedSDP.match(opusFmtpRegex)) {
+        optimizedSDP = optimizedSDP.replace(
+          opusFmtpRegex,
+          `a=fmtp:${opusPayloadType} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=1;sprop-stereo=1`
+        );
+      } else {
+        optimizedSDP = optimizedSDP.replace(
+          opusRegex,
+          `$&\r\na=fmtp:${opusPayloadType} minptime=10;useinbandfec=1;maxaveragebitrate=128000;stereo=1;sprop-stereo=1`
+        );
+      }
+      
+      // 将 Opus 移到音频编码列表的最前面
+      const audioMLineRegex = /m=audio \d+ [^\r\n]+/;
+      const audioMLineMatch = optimizedSDP.match(audioMLineRegex);
+      if (audioMLineMatch) {
+        const audioMLine = audioMLineMatch[0];
+        const audioPayloadTypes = audioMLine.split(' ').slice(3);
+        
+        const reorderedAudioTypes = [opusPayloadType, ...audioPayloadTypes.filter(pt => pt !== opusPayloadType)];
+        const newAudioMLine = audioMLine.split(' ').slice(0, 3).join(' ') + ' ' + reorderedAudioTypes.join(' ');
+        
+        optimizedSDP = optimizedSDP.replace(audioMLineRegex, newAudioMLine);
+      }
+    }
+    
+    // 8. 添加低延迟属性
+    optimizedSDP = optimizedSDP.replace(
+      /(a=rtcp-mux\r\n)/g,
+      '$1a=rtcp-rsize\r\n' // 启用 RTCP 精简模式
+    );
+    
+    // 9. 设置 RTCP 反馈机制以快速响应网络变化
+    if (h264Match) {
+      const h264PayloadType = h264Match[1];
+      // 确保有 NACK 和 PLI 反馈
+      if (!optimizedSDP.includes(`a=rtcp-fb:${h264PayloadType} nack`)) {
+        optimizedSDP = optimizedSDP.replace(
+          new RegExp(`(a=rtpmap:${h264PayloadType} H264/90000\r\n)`),
+          `$1a=rtcp-fb:${h264PayloadType} nack\r\na=rtcp-fb:${h264PayloadType} nack pli\r\na=rtcp-fb:${h264PayloadType} goog-remb\r\n`
+        );
+      }
+    }
+    
+    console.log('✓ SDP 已优化（高质量高帧率低延迟模式）');
+    return optimizedSDP;
   }
   
   /**
@@ -320,9 +503,89 @@ export default class WebRTCManager {
   }
   
   /**
+   * 启动自适应质量调整
+   */
+  startQualityAdjustment() {
+    if (this.qualityAdjustmentInterval) {
+      clearInterval(this.qualityAdjustmentInterval);
+    }
+    
+    // 每 5 秒检查一次网络状况并调整质量
+    this.qualityAdjustmentInterval = setInterval(() => {
+      this.adaptiveQualityAdjustment();
+    }, 5000);
+  }
+  
+  /**
+   * 停止自适应质量调整
+   */
+  stopQualityAdjustment() {
+    if (this.qualityAdjustmentInterval) {
+      clearInterval(this.qualityAdjustmentInterval);
+      this.qualityAdjustmentInterval = null;
+    }
+  }
+  
+  /**
+   * 自适应调整视频质量
+   * 根据网络状况自动调整视频参数
+   */
+  async adaptiveQualityAdjustment() {
+    if (!this.peerConnection) return;
+    
+    try {
+      const stats = await this.peerConnection.getStats();
+      let shouldAdjust = false;
+      let newSettings = {};
+      
+      stats.forEach(report => {
+        if (report.type === 'inbound-rtp' && report.kind === 'video') {
+          // 检查丢包率
+          if (report.packetsLost && report.packetsReceived) {
+            const totalPackets = report.packetsLost + report.packetsReceived;
+            const packetLoss = (report.packetsLost / totalPackets) * 100;
+            
+            if (packetLoss > 5) {
+              // 丢包率高，降低质量
+              shouldAdjust = true;
+              newSettings = {
+                width: 640,
+                height: 480,
+                frameRate: 15
+              };
+              console.log('检测到高丢包率，降低视频质量');
+            }
+          }
+        }
+        
+        if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+          // 检查 RTT
+          if (report.currentRoundTripTime && report.currentRoundTripTime > 0.2) {
+            // RTT 超过 200ms，降低质量
+            shouldAdjust = true;
+            newSettings = {
+              width: 640,
+              height: 480,
+              frameRate: 15
+            };
+            console.log('检测到高延迟，降低视频质量');
+          }
+        }
+      });
+      
+      if (shouldAdjust && Object.keys(newSettings).length > 0) {
+        this.updateVideoSettings(newSettings);
+      }
+    } catch (err) {
+      console.error('自适应质量调整失败:', err);
+    }
+  }
+  
+  /**
    * 停止连接
    */
   stop() {
+    this.stopQualityAdjustment();
     this.cleanup();
     this.connectionState = 'disconnected';
   }
@@ -331,6 +594,8 @@ export default class WebRTCManager {
    * 清理资源
    */
   cleanup() {
+    this.stopQualityAdjustment();
+    
     if (this.dataChannel) {
       this.dataChannel.close();
       this.dataChannel = null;
