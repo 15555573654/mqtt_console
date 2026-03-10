@@ -5,6 +5,7 @@
     :fullscreen="isMobile"
     :show-close="false"
     :close-on-click-modal="false"
+    :modal="false"
     custom-class="screencast-control-dialog"
     @close="handleClose"
     @open="handleOpen"
@@ -927,6 +928,17 @@ export default {
   }
 };
 </script>
+
+<style>
+/* 全局样式 - 点击穿透设置 */
+.el-dialog__wrapper {
+  pointer-events: none !important;
+}
+
+.screencast-control-dialog {
+  pointer-events: auto !important;
+}
+</style>
 
 <style scoped>
 /* 投屏控制弹窗 - 简洁直角风格 */
