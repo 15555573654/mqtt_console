@@ -1,8 +1,8 @@
 <template>
   <div class="app-container">
     <!-- 统计信息 -->
-    <el-row :gutter="20" class="mb8">
-      <el-col :span="6">
+    <el-row :gutter="20" class="mb8 statistics-row">
+      <el-col :xs="12" :sm="12" :md="6" :lg="6">
         <el-card shadow="hover">
           <div class="statistic-item">
             <i class="el-icon-monitor statistic-icon"></i>
@@ -13,7 +13,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="12" :md="6" :lg="6">
         <el-card shadow="hover">
           <div class="statistic-item">
             <i class="el-icon-success statistic-icon" style="color: #67C23A"></i>
@@ -24,7 +24,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="12" :md="6" :lg="6">
         <el-card shadow="hover">
           <div class="statistic-item">
             <i class="el-icon-error statistic-icon" style="color: #F56C6C"></i>
@@ -35,7 +35,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :xs="12" :sm="12" :md="6" :lg="6">
         <el-card shadow="hover">
           <div class="statistic-item">
             <i class="el-icon-coin statistic-icon" style="color: #E6A23C"></i>
@@ -50,7 +50,7 @@
 
     <!-- 查询和连接表单 -->
     <div class="query-connection-wrapper">
-      <el-form :model="queryParams" ref="queryForm" size="small" :inline="true" v-show="showSearch" label-width="68px" class="query-form">
+      <el-form :model="queryParams" ref="queryForm" size="small" :inline="!isMobile" v-show="showSearch" label-width="68px" class="query-form">
         <el-form-item label="设备名称" prop="deviceName">
           <el-input
             v-model="queryParams.deviceName"
@@ -79,28 +79,29 @@
       </el-form>
 
       <!-- MQTT连接设置 -->
-      <el-form ref="connectionForm" :model="connectionForm" :rules="connectionRules" inline size="small" class="connection-form">
-        <el-form-item label="服务器状态">
+      <el-form ref="connectionForm" :model="connectionForm" :rules="connectionRules" :inline="!isMobile" size="small" class="connection-form">
+        <el-form-item label="服务器状态" class="mobile-full-width">
           <el-tag :type="isConnected ? 'success' : 'info'" size="medium">
             {{ isConnected ? '已连接' : '未连接' }}
           </el-tag>
-          <span v-if="isConnected" style="margin-left: 10px; color: #67C23A; font-size: 12px">
+          <span v-if="isConnected" class="username-display">
             <i class="el-icon-user"></i> {{ currentUsername }}
           </span>
         </el-form-item>
-        <el-form-item prop="username">
-          <el-input v-model="connectionForm.username" placeholder="用户名" :disabled="isConnected" style="width: 120px" />
+        <el-form-item prop="username" class="mobile-full-width">
+          <el-input v-model="connectionForm.username" placeholder="用户名" :disabled="isConnected" :style="isMobile ? 'width: 100%' : 'width: 120px'" />
         </el-form-item>
-        <el-form-item prop="password">
-          <el-input v-model="connectionForm.password" type="password" placeholder="密码" show-password :disabled="isConnected" style="width: 120px" />
+        <el-form-item prop="password" class="mobile-full-width">
+          <el-input v-model="connectionForm.password" type="password" placeholder="密码" show-password :disabled="isConnected" :style="isMobile ? 'width: 100%' : 'width: 120px'" />
         </el-form-item>
-        <el-form-item>
+        <el-form-item class="mobile-full-width">
           <el-button
             v-if="!isConnected"
             type="primary"
             size="small"
             @click="handleConnect"
             :loading="connecting"
+            :style="isMobile ? 'width: 100%' : ''"
             v-hasPermi="['mqtt:connection:connect']"
           >连接</el-button>
           <el-button
@@ -108,6 +109,7 @@
             type="danger"
             size="small"
             @click="handleDisconnect"
+            :style="isMobile ? 'width: 100%' : ''"
             v-hasPermi="['mqtt:connection:disconnect']"
           >断开</el-button>
         </el-form-item>
@@ -116,7 +118,8 @@
 
     <!-- 操作按钮 -->
     <el-row :gutter="10" class="mb8">
-      <el-col :span="1.5">
+      <!-- 桌面端按钮组 -->
+      <div class="desktop-button-group">
         <el-button
           type="success"
           plain
@@ -126,8 +129,6 @@
           @click="handleCommand('start')"
           v-hasPermi="['mqtt:device:command']"
         >启动</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="danger"
           plain
@@ -137,8 +138,6 @@
           @click="handleCommand('stop')"
           v-hasPermi="['mqtt:device:command']"
         >停止</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="warning"
           plain
@@ -148,8 +147,6 @@
           @click="handleCommand('pause')"
           v-hasPermi="['mqtt:device:command']"
         >暂停</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="primary"
           plain
@@ -159,8 +156,6 @@
           @click="handleCommand('resume')"
           v-hasPermi="['mqtt:device:command']"
         >恢复</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="info"
           plain
@@ -170,8 +165,6 @@
           @click="handleCommand('updateScript')"
           v-hasPermi="['mqtt:device:command']"
         >更新脚本</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="danger"
           plain
@@ -181,8 +174,6 @@
           @click="handleDelete"
           v-hasPermi="['mqtt:device:remove']"
         >删除设备</el-button>
-      </el-col>
-      <el-col :span="1.5">
         <el-button
           type="primary"
           plain
@@ -192,8 +183,99 @@
           @click="openScreencastDialog"
           v-hasPermi="['mqtt:device:screencast']"
         >投屏控制</el-button>
-      </el-col>
-      <right-toolbar :showSearch.sync="showSearch" @queryTable="refreshData"></right-toolbar>
+        <right-toolbar :showSearch.sync="showSearch" @queryTable="refreshData" class="inline-toolbar"></right-toolbar>
+      </div>
+
+      <!-- 移动端按钮组 -->
+      <div class="mobile-button-group">
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="success"
+            plain
+            icon="el-icon-video-play"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleCommand('start')"
+            v-hasPermi="['mqtt:device:command']"
+            class="mobile-full-btn"
+          >启动</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="danger"
+            plain
+            icon="el-icon-video-pause"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleCommand('stop')"
+            v-hasPermi="['mqtt:device:command']"
+            class="mobile-full-btn"
+          >停止</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="warning"
+            plain
+            icon="el-icon-video-pause"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleCommand('pause')"
+            v-hasPermi="['mqtt:device:command']"
+            class="mobile-full-btn"
+          >暂停</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="primary"
+            plain
+            icon="el-icon-video-play"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleCommand('resume')"
+            v-hasPermi="['mqtt:device:command']"
+            class="mobile-full-btn"
+          >恢复</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="info"
+            plain
+            icon="el-icon-refresh"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleCommand('updateScript')"
+            v-hasPermi="['mqtt:device:command']"
+            class="mobile-full-btn"
+          >更新脚本</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="danger"
+            plain
+            icon="el-icon-delete"
+            size="mini"
+            :disabled="multiple || !isConnected"
+            @click="handleDelete"
+            v-hasPermi="['mqtt:device:remove']"
+            class="mobile-full-btn"
+          >删除设备</el-button>
+        </el-col>
+        <el-col :xs="12" :sm="8" class="mb8-mobile">
+          <el-button
+            type="primary"
+            plain
+            icon="el-icon-video-camera"
+            size="mini"
+            :disabled="single || !isConnected"
+            @click="openScreencastDialog"
+            v-hasPermi="['mqtt:device:screencast']"
+            class="mobile-full-btn"
+          >投屏控制</el-button>
+        </el-col>
+        <el-col :xs="24" :sm="8" class="toolbar-col">
+          <right-toolbar :showSearch.sync="showSearch" @queryTable="refreshData"></right-toolbar>
+        </el-col>
+      </div>
     </el-row>
 
     <!-- 设备列表 -->
@@ -259,6 +341,8 @@ export default {
   },
   data() {
     return {
+      // 移动端检测
+      isMobile: false,
       // MQTT连接相关
       mqttClient: null,
       isConnected: false,
@@ -321,6 +405,10 @@ export default {
     };
   },
   created() {
+    // 检测是否为移动端
+    this.checkMobile();
+    window.addEventListener('resize', this.checkMobile);
+    
     // 从localStorage加载连接配置（只加载用户名和密码）
     this.loadConnectionConfig();
     // 加载历史设备数据
@@ -328,6 +416,9 @@ export default {
     this.getStatistics();
   },
   beforeDestroy() {
+    // 移除resize监听
+    window.removeEventListener('resize', this.checkMobile);
+    
     // 断开MQTT连接
     if (this.mqttClient) {
       this.mqttClient.end();
@@ -338,6 +429,10 @@ export default {
     }
   },
   methods: {
+    /** 检测是否为移动端 */
+    checkMobile() {
+      this.isMobile = window.innerWidth < 768;
+    },
     /** 加载连接配置（只加载用户名和密码） */
     loadConnectionConfig() {
       const config = localStorage.getItem('mqttConnectionConfig');
@@ -936,6 +1031,168 @@ export default {
   }
 }
 
+/* 移动端适配 */
+@media (max-width: 768px) {
+  /* 隐藏桌面端按钮组 */
+  .desktop-button-group {
+    display: none;
+  }
+  
+  /* 显示移动端按钮组 */
+  .mobile-button-group {
+    display: block;
+  }
+  
+  /* 统计卡片移动端样式 */
+  .statistics-row {
+    margin-bottom: 15px;
+  }
+  
+  .statistics-row .el-col {
+    margin-bottom: 10px;
+  }
+  
+  .statistic-item {
+    padding: 8px !important;
+  }
+  
+  .statistic-icon {
+    font-size: 32px !important;
+    margin-right: 10px !important;
+  }
+  
+  .statistic-value {
+    font-size: 20px !important;
+  }
+  
+  .statistic-label {
+    font-size: 12px !important;
+  }
+  
+  /* 查询表单移动端样式 */
+  .query-form {
+    min-width: 100%;
+    width: 100%;
+  }
+  
+  .query-form .el-form-item {
+    width: 100%;
+    margin-right: 0;
+  }
+  
+  .query-form .el-form-item__content {
+    width: 100%;
+  }
+  
+  .query-form .el-input,
+  .query-form .el-select {
+    width: 100% !important;
+  }
+  
+  /* 连接表单移动端样式 */
+  .connection-form {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 15px;
+    text-align: left;
+  }
+  
+  .connection-form .mobile-full-width {
+    width: 100%;
+    margin-right: 0;
+  }
+  
+  .connection-form .mobile-full-width .el-form-item__content {
+    width: 100%;
+  }
+  
+  .username-display {
+    display: block;
+    margin-left: 0 !important;
+    margin-top: 5px;
+    color: #67C23A;
+    font-size: 12px;
+  }
+  
+  /* 操作按钮移动端样式 */
+  .mb8-mobile {
+    margin-bottom: 8px;
+  }
+  
+  .mobile-full-btn {
+    width: 100%;
+  }
+  
+  .toolbar-col {
+    text-align: right;
+    margin-top: 8px;
+  }
+  
+  /* 表格移动端优化 */
+  .app-container {
+    padding: 10px;
+  }
+  
+  /* 分页器移动端样式 */
+  .pagination-container {
+    padding: 10px 0;
+  }
+}
+
+/* 平板适配 */
+@media (min-width: 768px) and (max-width: 1024px) {
+  /* 隐藏桌面端按钮组 */
+  .desktop-button-group {
+    display: none;
+  }
+  
+  /* 显示移动端按钮组 */
+  .mobile-button-group {
+    display: block;
+  }
+  
+  .statistic-icon {
+    font-size: 40px !important;
+  }
+  
+  .statistic-value {
+    font-size: 24px !important;
+  }
+  
+  .query-form {
+    min-width: 100%;
+  }
+  
+  .connection-form {
+    margin-left: 0;
+    margin-top: 10px;
+    width: 100%;
+  }
+}
+
+/* 桌面端样式 */
+@media (min-width: 1024px) {
+  /* 显示桌面端按钮组 */
+  .desktop-button-group {
+    display: block;
+  }
+  
+  /* 隐藏移动端按钮组 */
+  .mobile-button-group {
+    display: none;
+  }
+  
+  .desktop-button-group .el-button {
+    margin-right: 10px;
+    margin-bottom: 0;
+  }
+  
+  .inline-toolbar {
+    display: inline-block;
+    vertical-align: middle;
+  }
+}
+
 .statistic-item {
   display: flex;
   align-items: center;
@@ -968,5 +1225,11 @@ export default {
   font-size: 12px;
   color: #67C23A;
   margin-top: 5px;
+}
+
+.username-display {
+  margin-left: 10px;
+  color: #67C23A;
+  font-size: 12px;
 }
 </style>
