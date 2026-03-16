@@ -75,49 +75,14 @@
 
       <!-- 设置面板 -->
       <div class="settings-panel" v-show="showSettings" @click.stop>
-        <!-- 质量预设 -->
+        <!-- 设置面板 -->
         <div class="setting-item">
-          <span>画质</span>
+          <span>传输质量</span>
           <el-select v-model="currentQuality" size="mini" @change="applyQualityPreset">
-            <el-option label="自动" value="auto" />
-            <el-option label="流畅 (480p@30fps)" value="low" />
-            <el-option label="标清 (720p@60fps)" value="medium" />
-            <el-option label="高清 (1080p@60fps)" value="high" />
+            <el-option label="高清 (1080p)" value="high" />
+            <el-option label="标清 (720p)" value="medium" />
+            <el-option label="流畅 (480p)" value="low" />
           </el-select>
-        </div>
-
-        <div class="stats-divider"></div>
-
-        <!-- 自定义设置 -->
-        <div class="setting-section-title">自定义设置</div>
-        <div class="setting-item">
-          <span>分辨率</span>
-          <el-input
-            v-model="videoConstraints.resolution"
-            size="mini"
-            :disabled="currentQuality === 'auto'"
-            placeholder="如: 1920x1080"
-          />
-        </div>
-        <div class="setting-item">
-          <span>帧率</span>
-          <el-select
-            v-model="videoConstraints.frameRate"
-            size="mini"
-            :disabled="currentQuality === 'auto'"
-          >
-            <el-option label="30 fps" :value="30" />
-            <el-option label="60 fps" :value="60" />
-          </el-select>
-        </div>
-        <div class="setting-item" v-if="currentQuality !== 'auto'">
-          <el-button
-            type="primary"
-            size="mini"
-            style="width: 100%"
-            @click="applyVideoSettings"
-            :disabled="!isStreaming"
-          >应用设置</el-button>
         </div>
 
         <!-- 统计信息 -->
@@ -125,20 +90,12 @@
         <div class="stats-section">
           <div class="stats-title">连接统计</div>
           <div class="stats-item">
-            <span>期望分辨率:</span>
-            <span>{{ getExpectedResolution() }}</span>
-          </div>
-          <div class="stats-item">
-            <span>实际分辨率:</span>
-            <span :class="{ 'stats-warning': !isResolutionMatched() }">{{ currentStats.resolution || '-' }}</span>
-          </div>
-          <div class="stats-item">
-            <span>期望帧率:</span>
-            <span>{{ videoConstraints.frameRate }} fps</span>
+            <span>视频分辨率:</span>
+            <span>{{ currentStats.resolution || '-' }}</span>
           </div>
           <div class="stats-item">
             <span>实际帧率:</span>
-            <span :class="{ 'stats-warning': currentStats.fps < videoConstraints.frameRate * 0.8 }">{{ currentStats.fps }} fps</span>
+            <span :class="{ 'stats-warning': currentStats.fps < 25 }">{{ currentStats.fps }} fps</span>
           </div>
           <div class="stats-item">
             <span>比特率:</span>
@@ -200,9 +157,9 @@ export default {
       isStreaming: false,
       showSettings: false,
 
-      // 拖动和缩放相关
-      dialogWidth: 420,
-      dialogHeight: 700,
+      // 拖动和缩放相关 - 自适应窗口大小
+      dialogWidth: 400,  // 初始宽度，会根据视频比例调整
+      dialogHeight: 700, // 固定高度，以竖屏长度为基准
       isDragging: false,
       isResizing: false,
       resizeType: '',
@@ -234,14 +191,14 @@ export default {
         frameRate: 60 // 提高默认帧率到60
       },
 
-      // 质量预设
+      // 质量预设 - 简化为3个选项
       qualityPresets: {
-        low: { resolution: '640x480', frameRate: 30, label: '流畅' },
-        medium: { resolution: '1280x720', frameRate: 60, label: '标清' },
         high: { resolution: '1920x1080', frameRate: 60, label: '高清' },
-        auto: { resolution: 'auto', frameRate: 60, label: '自动' }
+        medium: { resolution: '1280x720', frameRate: 30, label: '标清' },
+        low: { resolution: '854x480', frameRate: 30, label: '流畅' }
       },
-      currentQuality: 'auto',
+      currentQuality: 'high',
+      videoFitMode: 'contain', // 视频填充模式：contain(完整显示，不裁剪)
 
       isMobile: false
     };
@@ -296,57 +253,89 @@ export default {
           if (!video.srcObject || video.srcObject.id !== stream.id) {
             console.log('设置新的视频流，流ID:', stream.id);
 
-            // 设置视频源
-            video.srcObject = stream;
-
-            // 优化视频播放设置 - 降低延迟
-            video.playsInline = true;
-            video.muted = false; // 启用音频
-            video.autoplay = true;
-
-            // 设置低延迟属性
-            if (video.hasAttribute) {
-              video.setAttribute('playsinline', '');
-              video.setAttribute('webkit-playsinline', '');
+            // 先暂停当前播放，避免冲突
+            if (video.srcObject) {
+              video.pause();
+              video.srcObject = null;
             }
 
-            // 关键：设置视频缓冲区为最小值以降低延迟
-            try {
-              // 尝试设置 latencyHint（Chrome 支持）
-              if ('latencyHint' in video) {
-                video.latencyHint = 0; // 最低延迟
+            // 等待一小段时间确保资源释放
+            setTimeout(() => {
+              // 设置视频源
+              video.srcObject = stream;
+
+              // 优化视频播放设置 - 降低延迟
+              video.playsInline = true;
+              video.muted = false; // 启用音频
+              video.autoplay = true;
+
+              // 设置低延迟属性
+              if (video.hasAttribute) {
+                video.setAttribute('playsinline', '');
+                video.setAttribute('webkit-playsinline', '');
               }
 
-              // 设置预加载策略
-              video.preload = 'auto';
+              // 关键：设置视频缓冲区为最小值以降低延迟
+              try {
+                // 尝试设置 latencyHint（Chrome 支持）
+                if ('latencyHint' in video) {
+                  video.latencyHint = 0; // 最低延迟
+                }
 
-              // 禁用画中画
-              video.disablePictureInPicture = true;
+                // 设置预加载策略
+                video.preload = 'auto';
 
-              // 设置控制条（可选）
-              video.controls = false;
-            } catch (err) {
-              console.warn('部分视频属性设置失败:', err);
-            }
+                // 禁用画中画
+                video.disablePictureInPicture = true;
 
-            console.log('✓ 视频元素srcObject已设置');
-
-            // 播放视频
-            video.play().then(() => {
-              console.log('✓ 视频开始播放');
-
-              // 尝试进入低延迟模式
-              this.enableLowLatencyMode(video);
-
-              // 启动统计信息监控
-              this.startStatsMonitoring();
-            }).catch(err => {
-              console.error('✗ 视频播放失败:', err);
-              // 如果自动播放失败，可能需要用户交互
-              if (err.name === 'NotAllowedError') {
-                this.$message.warning('请点击视频区域以开始播放');
+                // 设置控制条（可选）
+                video.controls = false;
+              } catch (err) {
+                console.warn('部分视频属性设置失败:', err);
               }
-            });
+
+              // 应用完整显示模式（保持宽高比，不裁剪）
+              video.style.objectFit = 'contain';
+
+              console.log('✓ 视频元素srcObject已设置');
+
+              // 播放视频 - 添加重试机制
+              const playVideo = async () => {
+                try {
+                  await video.play();
+                  console.log('✓ 视频开始播放');
+
+                  // 尝试进入低延迟模式
+                  this.enableLowLatencyMode(video);
+
+                  // 启动统计信息监控
+                  this.startStatsMonitoring();
+                } catch (err) {
+                  console.error('✗ 视频播放失败:', err);
+                  
+                  // 如果是 AbortError，尝试重新播放
+                  if (err.name === 'AbortError') {
+                    console.log('检测到播放中断，1秒后重试...');
+                    setTimeout(() => {
+                      if (video.srcObject && video.readyState >= 2) {
+                        video.play().catch(retryErr => {
+                          console.error('重试播放失败:', retryErr);
+                        });
+                      }
+                    }, 1000);
+                  } else if (err.name === 'NotAllowedError') {
+                    this.$message.warning('请点击视频区域以开始播放');
+                  }
+                }
+              };
+
+              // 等待视频元数据加载完成后再播放
+              if (video.readyState >= 2) {
+                playVideo();
+              } else {
+                video.addEventListener('loadedmetadata', playVideo, { once: true });
+              }
+            }, 100); // 100ms 延迟确保资源释放
           } else {
             console.log('视频元素已有相同流，跳过重复设置');
           }
@@ -463,9 +452,24 @@ export default {
       this.isStreaming = false;
       this.statusText = '已停止';
 
-      // 清除视频元素
+      // 清除视频元素 - 改进版本
       if (this.$refs.remoteVideo) {
-        this.$refs.remoteVideo.srcObject = null;
+        const video = this.$refs.remoteVideo;
+        
+        // 先暂停播放
+        video.pause();
+        
+        // 清除事件监听器
+        video.removeEventListener('loadedmetadata', () => {});
+        
+        // 清除视频源
+        video.srcObject = null;
+        video.src = '';
+        
+        // 重置视频属性
+        video.load();
+        
+        console.log('✓ 视频元素已清理');
       }
     },
 
@@ -475,9 +479,10 @@ export default {
         clearInterval(this.statsInterval);
       }
 
-      // 用于计算比特率的变量
+      // 用于计算比特率和帧率的变量
       let lastBytesReceived = 0;
       let lastTimestamp = 0;
+      let lastFramesDecoded = 0;
 
       this.statsInterval = setInterval(async () => {
         if (!this.webrtcManager || !this.webrtcManager.peerConnection) {
@@ -497,24 +502,41 @@ export default {
                 this.currentStats.bitrate = Math.round((bytesDiff * 8) / timeDiff / 1000); // kbps
               }
 
+              // 帧率 - 在更新 lastTimestamp 之前计算
+              if (report.framesPerSecond !== undefined && report.framesPerSecond > 0) {
+                this.currentStats.fps = Math.round(report.framesPerSecond);
+              } else if (report.framesDecoded !== undefined && lastTimestamp > 0 && lastFramesDecoded > 0) {
+                // 备用方案：通过解码帧数增量计算
+                const timeDiff = (report.timestamp - lastTimestamp) / 1000;
+                const framesDiff = report.framesDecoded - lastFramesDecoded;
+                if (timeDiff > 0 && framesDiff >= 0) {
+                  this.currentStats.fps = Math.round(framesDiff / timeDiff);
+                }
+              }
+              
+              // 保存当前帧数用于下次计算
+              if (report.framesDecoded !== undefined) {
+                lastFramesDecoded = report.framesDecoded;
+              }
+
+              // 更新上次的值（放在帧率计算之后）
               lastBytesReceived = report.bytesReceived;
               lastTimestamp = report.timestamp;
 
-              // 帧率
-              if (report.framesPerSecond !== undefined) {
-                this.currentStats.fps = Math.round(report.framesPerSecond);
-              } else if (report.framesDecoded !== undefined && lastTimestamp > 0) {
-                // 备用方案：通过解码帧数计算
-                this.currentStats.fps = Math.round(report.framesDecoded / ((report.timestamp - lastTimestamp) / 1000));
-              }
-
               // 分辨率
               if (report.frameWidth && report.frameHeight) {
-                this.currentStats.resolution = `${report.frameWidth}x${report.frameHeight}`;
-
-                // 自动更新分辨率显示
-                if (this.videoConstraints.resolution === 'auto') {
-                  this.videoConstraints.resolution = this.currentStats.resolution;
+                const newResolution = `${report.frameWidth}x${report.frameHeight}`;
+                
+                // 分辨率变化时自动调整弹窗大小
+                if (this.currentStats.resolution !== newResolution) {
+                  this.currentStats.resolution = newResolution;
+                  
+                  // 自动调整弹窗大小以适应新的视频比例
+                  this.$nextTick(() => {
+                    this.autoResizeDialog();
+                  });
+                  
+                  console.log('视频分辨率已更新:', newResolution, '- 弹窗大小已自适应调整');
                 }
               }
 
@@ -558,9 +580,9 @@ export default {
             }
           });
 
-          // 如果延迟过高，自动调整质量
-          if (this.currentStats.rtt > 200 || this.currentStats.packetLoss > 5) {
-            console.warn('检测到高延迟或丢包，建议降低视频质量');
+          // 如果延迟过高，自动调整质量 - 提高阈值避免误报
+          if (this.currentStats.rtt > 500 || this.currentStats.packetLoss > 15) {
+            console.warn('检测到高延迟(' + this.currentStats.rtt + 'ms)或丢包(' + this.currentStats.packetLoss + '%)，建议降低视频质量');
           }
         } catch (err) {
           console.error('获取统计信息失败:', err);
@@ -659,6 +681,36 @@ export default {
       this.$message.success(`已发送${keyNames[key] || key}按键`);
     },
 
+    /** 根据视频分辨率自适应调整弹窗大小（以竖屏长度为基准） */
+    autoResizeDialog() {
+      if (!this.$refs.remoteVideo || !this.currentStats.resolution) return;
+      
+      const [videoWidth, videoHeight] = this.currentStats.resolution.split('x').map(Number);
+      if (!videoWidth || !videoHeight) return;
+
+      // 固定高度为700px（竖屏长度基准）
+      const fixedHeight = 700;
+      
+      // 根据视频宽高比计算对应的宽度
+      const videoAspectRatio = videoWidth / videoHeight;
+      
+      // 计算视频显示区域的宽度（减去工具栏等空间）
+      const toolbarWidth = 40; // 右侧工具栏宽度
+      const topToolbarHeight = 50; // 顶部工具栏高度
+      
+      // 视频显示区域的高度
+      const videoDisplayHeight = fixedHeight - topToolbarHeight;
+      
+      // 根据宽高比计算视频显示区域的宽度
+      const videoDisplayWidth = videoDisplayHeight * videoAspectRatio;
+      
+      // 弹窗总宽度 = 视频显示宽度 + 工具栏宽度
+      this.dialogWidth = Math.round(videoDisplayWidth + toolbarWidth);
+      this.dialogHeight = fixedHeight;
+
+      console.log(`自适应弹窗大小: ${this.dialogWidth}x${this.dialogHeight} (视频: ${videoWidth}x${videoHeight}, 比例: ${videoAspectRatio.toFixed(2)})`);
+    },
+
     /** 请求屏幕共享 */
     requestScreenShare() {
       if (!this.webrtcManager || !this.webrtcManager.isDataChannelOpen()) {
@@ -696,63 +748,30 @@ export default {
       }
     },
 
-    /** 应用视频设置 */
-    async applyVideoSettings() {
-      if (!this.webrtcManager || !this.webrtcManager.peerConnection) {
-        this.$message.warning('请先建立连接');
-        return;
-      }
-
-      // 如果是自动模式，不发送设置
-      if (this.videoConstraints.resolution === 'auto') {
-        this.$message.info('自动模式将使用设备原始分辨率');
-        return;
-      }
-
-      const resolutionParts = this.videoConstraints.resolution.split('x');
-      if (resolutionParts.length !== 2) {
-        this.$message.error('分辨率格式错误，应为: 宽x高 (如: 1920x1080)');
-        return;
-      }
-
-      const width = parseInt(resolutionParts[0]);
-      const height = parseInt(resolutionParts[1]);
-
-      if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
-        this.$message.error('分辨率数值无效');
-        return;
-      }
-
-      console.log('应用新的视频设置:', { width, height, frameRate: this.videoConstraints.frameRate });
-
-      try {
-        // 使用重新协商来应用新的视频设置
-        await this.webrtcManager.renegotiate({
-          width: width,
-          height: height,
-          frameRate: this.videoConstraints.frameRate
-        });
-
-        this.$message.success(`正在应用新设置: ${width}x${height}@${this.videoConstraints.frameRate}fps，请等待设备响应...`);
-      } catch (error) {
-        console.error('应用视频设置失败:', error);
-        this.$message.error('应用视频设置失败: ' + error.message);
-      }
-    },
-
     /** 应用质量预设 */
     applyQualityPreset() {
       const preset = this.qualityPresets[this.currentQuality];
-      if (preset) {
-        this.videoConstraints.resolution = preset.resolution;
-        this.videoConstraints.frameRate = preset.frameRate;
+      if (!preset) return;
 
-        // 如果不是自动模式，立即应用设置
-        if (this.currentQuality !== 'auto') {
-          this.applyVideoSettings();
-        } else {
-          this.$message.success(`已切换到${preset.label}模式`);
-        }
+      console.log(`切换到${preset.label}模式:`, preset);
+
+      // 发送质量设置给Android端
+      if (this.webrtcManager && this.webrtcManager.isDataChannelOpen()) {
+        const qualitySettings = {
+          quality: this.currentQuality,
+          resolution: preset.resolution,
+          frameRate: preset.frameRate
+        };
+
+        this.webrtcManager.sendMessage({
+          action: 'setQuality',
+          settings: qualitySettings
+        });
+
+        this.$message.success(`已切换到${preset.label}模式，设备正在调整...`);
+        console.log('发送给Android端的质量设置:', qualitySettings);
+      } else {
+        this.$message.warning('请先建立连接');
       }
     },
 
@@ -774,22 +793,6 @@ export default {
       if (fps >= 45) return 'fps-good';
       if (fps >= 30) return 'fps-fair';
       return 'fps-poor';
-    },
-
-    /** 获取期望的分辨率 */
-    getExpectedResolution() {
-      if (this.videoConstraints.resolution === 'auto') {
-        return '自动';
-      }
-      return this.videoConstraints.resolution;
-    },
-
-    /** 检查分辨率是否匹配 */
-    isResolutionMatched() {
-      if (!this.currentStats.resolution || this.videoConstraints.resolution === 'auto') {
-        return true;
-      }
-      return this.currentStats.resolution === this.videoConstraints.resolution;
     },
 
     /** 全屏切换 */
@@ -919,8 +922,31 @@ export default {
         this.webrtcManager.cleanup();
       }
 
+      // 改进的视频元素清理
       if (this.$refs.remoteVideo) {
-        this.$refs.remoteVideo.srcObject = null;
+        const video = this.$refs.remoteVideo;
+        
+        try {
+          // 暂停播放
+          video.pause();
+          
+          // 清除所有事件监听器
+          const events = ['loadedmetadata', 'playing', 'waiting', 'error', 'ended'];
+          events.forEach(event => {
+            video.removeEventListener(event, () => {});
+          });
+          
+          // 清除视频源
+          video.srcObject = null;
+          video.src = '';
+          
+          // 重置视频元素
+          video.load();
+          
+          console.log('✓ 视频资源完全清理');
+        } catch (err) {
+          console.warn('清理视频资源时出现警告:', err);
+        }
       }
 
       this.isStreaming = false;
@@ -1077,7 +1103,7 @@ export default {
   opacity: 0.7;
 }
 
-/* 视频容器 */
+/* 视频容器 - 固定大小窗口优化 */
 .video-container {
   position: relative;
   flex: 1;
@@ -1086,12 +1112,13 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 0; /* 确保flex子元素可以缩小 */
 }
 
 .video-stream {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: contain; /* 完整显示视频内容，保持宽高比，不裁剪 */
 }
 
 .stream-placeholder {
