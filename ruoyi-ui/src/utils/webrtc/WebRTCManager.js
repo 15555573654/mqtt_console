@@ -193,6 +193,16 @@ export default class WebRTCManager {
         case 'failed':
           console.error('✗ ICE连接失败 - 可能是NAT/防火墙问题');
           console.error('建议检查：1) 网络防火墙设置 2) STUN/TURN服务器配置 3) NAT类型');
+          
+          // ICE连接失败时，尝试重新建立连接
+          console.log('🔄 ICE连接失败，5秒后尝试重新建立连接...');
+          setTimeout(() => {
+            if (this.peerConnection && this.peerConnection.iceConnectionState === 'failed') {
+              console.log('执行ICE重启...');
+              this.restartIce();
+            }
+          }, 5000);
+          
           if (this.callbacks.onError) {
             this.callbacks.onError('ICE连接失败，请检查网络配置');
           }
@@ -202,9 +212,10 @@ export default class WebRTCManager {
           // ICE断开可能是临时的，等待一段时间看是否恢复
           setTimeout(() => {
             if (this.peerConnection && this.peerConnection.iceConnectionState === 'disconnected') {
-              console.warn('ICE连接持续断开，可能需要重新建立连接');
+              console.warn('ICE连接持续断开，尝试重新建立连接');
+              this.restartIce();
             }
-          }, 5000);
+          }, 10000);
           break;
         case 'closed':
           console.log('ICE连接已关闭');
@@ -736,6 +747,45 @@ export default class WebRTCManager {
       }
     } catch (err) {
       console.error('自适应质量调整失败:', err);
+    }
+  }
+  
+  /**
+   * 重启ICE连接
+   */
+  async restartIce() {
+    if (!this.peerConnection) {
+      console.error('PeerConnection不存在，无法重启ICE');
+      return;
+    }
+    
+    try {
+      console.log('🔄 开始ICE重启...');
+      
+      // 创建新的offer，启用ICE重启
+      const offerOptions = {
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        iceRestart: true // 关键：启用ICE重启
+      };
+      
+      const offer = await this.peerConnection.createOffer(offerOptions);
+      offer.sdp = this.optimizeSDP(offer.sdp);
+      
+      await this.peerConnection.setLocalDescription(offer);
+      
+      // 发送ICE重启的offer
+      this.sendSignaling({
+        type: 'offer',
+        deviceName: this.deviceName,
+        offer: offer,
+        videoConstraints: this.videoConstraints,
+        iceRestart: true
+      });
+      
+      console.log('✓ ICE重启offer已发送');
+    } catch (error) {
+      console.error('ICE重启失败:', error);
     }
   }
   

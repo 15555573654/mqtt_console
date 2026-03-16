@@ -978,8 +978,17 @@ export default {
 
     /** 处理 Answer */
     async handleAnswer(answer) {
+      console.log('📥 ScreencastDialog收到Answer:', answer);
       if (this.webrtcManager) {
-        await this.webrtcManager.handleAnswer(answer);
+        try {
+          await this.webrtcManager.handleAnswer(answer);
+          console.log('✅ Answer处理完成');
+        } catch (error) {
+          console.error('❌ Answer处理失败:', error);
+          this.$message.error('处理Answer失败: ' + error.message);
+        }
+      } else {
+        console.error('❌ WebRTC管理器不存在');
       }
     },
 
