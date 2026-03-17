@@ -593,6 +593,15 @@ export default {
           };
           console.log('视频传输分辨率已更新');
           break;
+        case 'quality-change-confirmation':
+          console.log(`✓ 设备确认质量变更: ${data.quality} (${data.width}x${data.height}@${data.frameRate}fps)`);
+          this.$message.success(`质量已切换到${this.qualityPresets[data.quality]?.label || data.quality}`);
+          // 更新视频传输分辨率
+          this.videoResolution = {
+            width: data.width,
+            height: data.height
+          };
+          break;
         default:
           console.log('未知反馈类型:', data.type);
       }

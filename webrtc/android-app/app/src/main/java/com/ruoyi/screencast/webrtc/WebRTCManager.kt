@@ -667,8 +667,14 @@ class WebRTCManager(private val context: Context) {
                     videoCapturer?.let { capturer ->
                         if (capturer is org.webrtc.ScreenCapturerAndroid) {
                             capturer.changeCaptureFormat(width, height, frameRate)
-                            logCallback?.invoke("✓ 视频质量已调整: ${width}x${height}@${frameRate}fps (安全模式)")
+                            logCallback?.invoke("✓ 视频质量已调整: ${width}x${height}@${frameRate}fps")
                             statusCallback?.invoke("质量已调整")
+                            
+                            // 发送新的视频传输分辨率到Web端
+                            sendVideoResolution(width, height)
+                            
+                            // 发送质量变更确认
+                            sendQualityChangeConfirmation(qualitySettings.quality, width, height, frameRate)
                         } else {
                             logCallback?.invoke("⚠️ 不支持的捕获器类型，无法调整质量")
                         }
@@ -686,12 +692,12 @@ class WebRTCManager(private val context: Context) {
     
     /** 处理视频刷新请求 */
     private fun handleVideoRefresh() {
-        logCallback?.invoke("🔄 收到视频刷新请求，强制刷新画面")
+        logCallback?.invoke("🔄 收到视频刷新请求")
         
         try {
             videoCapturer?.let { capturer ->
-                if (localVideoTrack != null && screenCaptureIntent != null) {
-                    logCallback?.invoke("🔄 执行安全的视频刷新（重新创建ScreenCapturer）")
+                if (localVideoTrack != null) {
+                    logCallback?.invoke("🔄 执行视频刷新（使用changeCaptureFormat）")
                     
                     try {
                         // 获取当前参数
@@ -701,17 +707,32 @@ class WebRTCManager(private val context: Context) {
                         val targetWidth = 720
                         val targetHeight = (screenHeight * 720.0 / screenWidth).toInt()
                         
-                        // 安全地重新创建ScreenCapturer以避免MediaProjection重复使用
-                        recreateScreenCapturer(targetWidth, targetHeight, 30)
-                        
-                        logCallback?.invoke("✓ 视频刷新完成（重新创建模式）")
-                        sendRefreshConfirmation()
+                        // 使用changeCaptureFormat刷新，不重新创建ScreenCapturer
+                        if (capturer is org.webrtc.ScreenCapturerAndroid) {
+                            // 先微调帧率触发刷新
+                            capturer.changeCaptureFormat(targetWidth, targetHeight, 29)
+                            
+                            // 200ms后恢复正常帧率
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                try {
+                                    capturer.changeCaptureFormat(targetWidth, targetHeight, 30)
+                                    logCallback?.invoke("✓ 视频刷新完成")
+                                    sendRefreshConfirmation()
+                                } catch (e: Exception) {
+                                    logCallback?.invoke("⚠️ 恢复帧率时出错: ${e.message}")
+                                    sendRefreshConfirmation()
+                                }
+                            }, 200)
+                        } else {
+                            logCallback?.invoke("⚠️ 不支持的捕获器类型，跳过刷新")
+                            sendRefreshConfirmation()
+                        }
                     } catch (e: Exception) {
-                        logCallback?.invoke("❌ 重新创建ScreenCapturer失败: ${e.message}")
+                        logCallback?.invoke("❌ 视频刷新失败: ${e.message}")
                         sendRefreshConfirmation()
                     }
                 } else {
-                    logCallback?.invoke("⚠️ 缺少必要的组件，无法刷新")
+                    logCallback?.invoke("⚠️ 视频轨道不可用，无法刷新")
                     sendRefreshConfirmation()
                 }
             } ?: run {
@@ -721,37 +742,6 @@ class WebRTCManager(private val context: Context) {
         } catch (e: Exception) {
             logCallback?.invoke("❌ 处理视频刷新请求失败: ${e.message}")
             sendRefreshConfirmation()
-        }
-    }
-    
-    /** 安全地重新创建ScreenCapturer */
-    private fun recreateScreenCapturer(width: Int, height: Int, frameRate: Int) {
-        screenCaptureIntent?.let { intent ->
-            try {
-                // 停止并释放当前的ScreenCapturer
-                videoCapturer?.stopCapture()
-                videoCapturer?.dispose()
-                
-                // 创建新的ScreenCapturer
-                videoCapturer = createScreenCapturer(intent)
-                
-                // 重新初始化
-                videoCapturer?.initialize(
-                    SurfaceTextureHelper.create("CaptureThread", null), 
-                    context, 
-                    videoSource?.capturerObserver
-                )
-                
-                // 启动新的捕获
-                videoCapturer?.startCapture(width, height, frameRate)
-                
-                logCallback?.invoke("✓ ScreenCapturer重新创建成功")
-            } catch (e: Exception) {
-                logCallback?.invoke("❌ 重新创建ScreenCapturer失败: ${e.message}")
-                throw e
-            }
-        } ?: run {
-            throw RuntimeException("screenCaptureIntent is null")
         }
     }
     
@@ -795,6 +785,23 @@ class WebRTCManager(private val context: Context) {
         val topic = "control/$username/$deviceName/feedback"
         mqttManager?.publish(topic, gson.toJson(resolutionMessage))
         logCallback?.invoke("✓ 已发送视频传输分辨率信息: ${width}x${height}")
+    }
+    
+    /** 发送质量变更确认消息 */
+    private fun sendQualityChangeConfirmation(quality: String, width: Int, height: Int, frameRate: Int) {
+        val confirmMessage = mapOf(
+            "type" to "quality-change-confirmation",
+            "deviceName" to deviceName,
+            "quality" to quality,
+            "width" to width,
+            "height" to height,
+            "frameRate" to frameRate,
+            "timestamp" to System.currentTimeMillis(),
+            "from" to "device"
+        )
+        val topic = "control/$username/$deviceName/feedback"
+        mqttManager?.publish(topic, gson.toJson(confirmMessage))
+        logCallback?.invoke("✓ 已发送质量变更确认: $quality (${width}x${height}@${frameRate}fps)")
     }
     
     private fun performVirtualKey(key: String) {
