@@ -69,8 +69,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 // 停止投屏
                 log("🛑 停止投屏")
-                stopScreenCaptureService()
-                webrtcManager.release()
+                webrtcManager.pauseStreaming()
                 binding.btnStartScreen.text = "开始投屏"
                 binding.tvScreenStatus.text = "状态: 已停止"
                 Toast.makeText(this, "投屏已停止", Toast.LENGTH_SHORT).show()
@@ -220,58 +219,54 @@ class MainActivity : AppCompatActivity() {
     
     private fun startScreenCaptureWithPermission() {
         if (pendingScreenCaptureData == null) {
-            Toast.makeText(this, "请先授权屏幕录制权限", Toast.LENGTH_SHORT).show()
-            log("✗ 无法启动屏幕捕获：缺少权限数据")
+            Toast.makeText(this, "No screen capture permission available", Toast.LENGTH_SHORT).show()
+            log("Screen capture permission data is missing")
             return
         }
-        
-        log("🚀 开始启动屏幕捕获服务...")
-        
-        // 先停止现有服务，避免冲突
-        stopScreenCaptureService()
-        
+
+        log("Preparing screen capture session...")
+
+        val hasRetainedCapture = webrtcManager.hasRetainedCaptureSession()
+        val hasRunningService = ScreenCaptureService.instance != null
         val serviceIntent = Intent(this, ScreenCaptureService::class.java)
         serviceIntent.putExtra("resultCode", pendingScreenCaptureResultCode)
         serviceIntent.putExtra("data", pendingScreenCaptureData)
-        
+
         try {
-            // Android 14+ 需要特殊处理前台服务启动
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Android 14+ 使用 startForegroundService 并确保服务立即调用 startForeground
-                startForegroundService(serviceIntent)
-                log("✓ Android 14+ 前台服务已启动")
-            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-                log("✓ 前台服务已启动")
+            if (!hasRunningService) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+                log("ScreenCaptureService started")
             } else {
-                startService(serviceIntent)
-                log("✓ 服务已启动")
+                log("Reusing existing ScreenCaptureService")
             }
-            
-            // 等待服务启动完成后再启动WebRTC捕获
+
+            val startDelayMs = if (hasRunningService || hasRetainedCapture) 200L else 1500L
             binding.root.postDelayed({
                 try {
                     webrtcManager.startCapture(pendingScreenCaptureResultCode, pendingScreenCaptureData!!)
-                    log("✓ WebRTC屏幕捕获已启动")
+                    log("WebRTC capture start requested")
                 } catch (e: Exception) {
-                    log("✗ WebRTC屏幕捕获启动失败: ${e.message}")
-                    Toast.makeText(this, "WebRTC启动失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    log("WebRTC capture start failed: ${e.message}")
+                    Toast.makeText(this, "WebRTC start failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
-            }, 1500) // 延迟1.5秒确保服务完全启动
-            
+            }, startDelayMs)
         } catch (e: Exception) {
-            log("✗ 启动屏幕捕获失败: ${e.message}")
-            Toast.makeText(this, "启动屏幕捕获失败: ${e.message}", Toast.LENGTH_LONG).show()
+            log("Failed to prepare screen capture: ${e.message}")
+            Toast.makeText(this, "Failed to prepare screen capture: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
-    
+
     private fun stopScreenCaptureService() {
         try {
             val serviceIntent = Intent(this, ScreenCaptureService::class.java)
             stopService(serviceIntent)
-            log("已停止现有屏幕捕获服务")
+            log("Stopped ScreenCaptureService")
         } catch (e: Exception) {
-            log("停止服务时出错: ${e.message}")
+            log("Failed to stop service: ${e.message}")
         }
     }
     

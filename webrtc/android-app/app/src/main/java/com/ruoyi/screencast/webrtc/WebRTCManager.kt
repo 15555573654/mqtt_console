@@ -21,6 +21,7 @@ class WebRTCManager(private val context: Context) {
     private var audioSource: AudioSource? = null
     private var localVideoTrack: VideoTrack? = null
     private var localAudioTrack: AudioTrack? = null
+    private var controlDataChannel: DataChannel? = null
     
     private var mqttManager: MqttManager? = null
     private var username: String = ""
@@ -78,7 +79,11 @@ class WebRTCManager(private val context: Context) {
     fun setScreenCaptureRequestCallback(callback: () -> Unit) {
         screenCaptureRequestCallback = callback
     }
-    
+
+    fun hasRetainedCaptureSession(): Boolean {
+        return videoCapturer != null && localVideoTrack != null
+    }
+
     fun startCapture(resultCode: Int, data: Intent) {
         try {
             screenCaptureIntent = data
@@ -86,33 +91,34 @@ class WebRTCManager(private val context: Context) {
             if (service == null) {
                 throw RuntimeException("ScreenCaptureService not running - MediaProjection requires foreground service")
             }
-
-            if (videoCapturer != null || localVideoTrack != null) {
-                logCallback?.invoke("⚠️ 屏幕捕获已在运行，先停止现有捕获")
-                stopCapture()
-            }
-
-            logCallback?.invoke("🎬 开始初始化屏幕捕获...")
-            val factory = createPeerConnectionFactory()
-            resetIceCandidateStats()
             val displayInfo = getDisplayInfo()
             activeCaptureConfig = requestedCaptureConfig.resolve(displayInfo)
-
-            logCallback?.invoke("📱 当前显示信息: ${displayInfo.width}x${displayInfo.height}, rotation=${displayInfo.rotationDegrees}°")
-            logCallback?.invoke("🎞️ 目标采集参数: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
-
             sendDeviceResolution(displayInfo)
+            if (hasRetainedCaptureSession()) {
+                logCallback?.invoke("Reusing retained MediaProjection capture session")
+                sendVideoResolution(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
+                statusCallback?.invoke("已启动")
+                pendingOffer?.let { offer ->
+                    handleOffer(offer)
+                    pendingOffer = null
+                }
+                return
+            }
+            if (videoCapturer != null || localVideoTrack != null) {
+                logCallback?.invoke("Cleaning up partial capture state before recreating capture")
+                stopCapture()
+            }
+            logCallback?.invoke("Starting MediaProjection capture")
+            val factory = createPeerConnectionFactory()
+            resetIceCandidateStats()
             sendVideoResolution(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
-
             videoCapturer = createScreenCapturer(data)
             videoSource = factory.createVideoSource(false)
-
             if (surfaceTextureHelper == null) {
                 surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", null)
             }
             videoCapturer?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
             videoCapturer?.startCapture(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
-
             localVideoTrack = factory.createVideoTrack("video", videoSource)
             if (audioSource == null) {
                 audioSource = factory.createAudioSource(MediaConstraints())
@@ -120,25 +126,17 @@ class WebRTCManager(private val context: Context) {
             if (localAudioTrack == null) {
                 localAudioTrack = factory.createAudioTrack("audio", audioSource)
             }
-
-            logCallback?.invoke("✅ 视频捕获已启动: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
-            statusCallback?.invoke("捕获中")
-
+            logCallback?.invoke("Capture started: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
+            statusCallback?.invoke("已启动")
             pendingOffer?.let { offer ->
-                logCallback?.invoke("📥 处理待处理的 offer，开始建立WebRTC连接")
                 handleOffer(offer)
                 pendingOffer = null
-                logCallback?.invoke("✓ 待处理的 offer 已处理完成")
-            } ?: run {
-                logCallback?.invoke("ℹ️ 没有待处理的 offer，等待Web端发起连接")
             }
-            
         } catch (e: Exception) {
-            logCallback?.invoke("❌ 启动捕获失败: ${e.message}")
+            logCallback?.invoke("Start capture failed: ${e.message}")
             e.printStackTrace()
         }
     }
-    
     private fun stopCapture() {
         try {
             logCallback?.invoke("🛑 停止现有屏幕捕获...")
@@ -373,6 +371,8 @@ class WebRTCManager(private val context: Context) {
                 override fun onRenegotiationNeeded() {}
                 override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {}
             })
+
+            setupControlDataChannel()
             
             // 检查是否已启动屏幕捕获
             if (localVideoTrack == null) {
@@ -523,6 +523,8 @@ class WebRTCManager(private val context: Context) {
     }
     
     private fun setupDataChannel(channel: DataChannel?) {
+        controlDataChannel?.unregisterObserver()
+        controlDataChannel = channel
         channel?.registerObserver(object : DataChannel.Observer {
             override fun onMessage(buffer: DataChannel.Buffer?) {
                 buffer?.let {
@@ -536,6 +538,29 @@ class WebRTCManager(private val context: Context) {
             override fun onBufferedAmountChange(amount: Long) {}
             override fun onStateChange() {}
         })
+    }
+
+    private fun setupControlDataChannel() {
+        val connection = peerConnection ?: return
+        val existingChannel = controlDataChannel
+        if (existingChannel != null && existingChannel.state() != DataChannel.State.CLOSED) {
+            setupDataChannel(existingChannel)
+            return
+        }
+
+        val init = DataChannel.Init().apply {
+            ordered = true
+            negotiated = true
+            id = 0
+        }
+
+        try {
+            val channel = connection.createDataChannel("control", init)
+            logCallback?.invoke("Control DataChannel created on Android side")
+            setupDataChannel(channel)
+        } catch (e: Exception) {
+            logCallback?.invoke("Failed to create Android control DataChannel: ${e.message}")
+        }
     }
     
     private fun handleControlMessage(message: String) {
@@ -584,22 +609,19 @@ class WebRTCManager(private val context: Context) {
     }
 
     private fun handleStopCaptureRequest() {
-        logCallback?.invoke("🛑 收到停止投屏指令，准备停止屏幕采集")
-
+        logCallback?.invoke("Received stopCapture request; pausing WebRTC streaming only")
         try {
             peerConnection?.close()
             peerConnection?.dispose()
             peerConnection = null
         } catch (e: Exception) {
-            logCallback?.invoke("⚠️ 清理PeerConnection时出错: ${e.message}")
+            logCallback?.invoke("Failed to close PeerConnection while handling stopCapture: ${e.message}")
         }
-
         pendingOffer = null
-        stopCapture()
-        stopScreenCaptureService()
-
+        controlDataChannel?.close()
+        controlDataChannel = null
         statusCallback?.invoke("已停止")
-        logCallback?.invoke("✓ 屏幕采集与前台录屏服务已停止")
+        logCallback?.invoke("Streaming paused; MediaProjection session retained")
     }
     
     private fun handleQualityChange(settings: QualitySettings?) {
@@ -934,6 +956,8 @@ class WebRTCManager(private val context: Context) {
             peerConnection?.close()
             peerConnection?.dispose()
             peerConnection = null
+            controlDataChannel?.close()
+            controlDataChannel = null
             
             // 清理待处理的offer
             pendingOffer = null
@@ -944,11 +968,31 @@ class WebRTCManager(private val context: Context) {
         }
     }
     
+    fun pauseStreaming() {
+        try {
+            peerConnection?.close()
+            peerConnection?.dispose()
+            peerConnection = null
+
+            controlDataChannel?.close()
+            controlDataChannel = null
+            pendingOffer = null
+
+
+            statusCallback?.invoke("已停止")
+            logCallback?.invoke("Screen casting paused; MediaProjection session kept alive")
+        } catch (e: Exception) {
+            logCallback?.invoke("Pause streaming failed: ${e.message}")
+        }
+    }
+
     fun release() {
         try {
             videoCapturer?.stopCapture()
             videoCapturer?.dispose()
             videoCapturer = null
+            controlDataChannel?.close()
+            controlDataChannel = null
             
             peerConnection?.close()
             peerConnection?.dispose()
@@ -1053,3 +1097,4 @@ class WebRTCManager(private val context: Context) {
         val y: Float
     )
 }
+
