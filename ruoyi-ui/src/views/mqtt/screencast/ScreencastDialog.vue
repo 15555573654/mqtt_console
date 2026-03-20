@@ -87,9 +87,9 @@
         <div class="setting-item">
           <span>传输质量</span>
           <el-select v-model="currentQuality" size="mini" @change="applyQualityPreset">
-            <el-option label="高清 (1080p)" value="high" />
-            <el-option label="标清 (720p)" value="medium" />
-            <el-option label="流畅 (480p)" value="low" />
+            <el-option label="高清" value="high" />
+            <el-option label="标清" value="medium" />
+            <el-option label="流畅" value="low" />
           </el-select>
         </div>
 
@@ -194,17 +194,12 @@ export default {
         rtt: 0
       },
 
-      videoConstraints: {
-        resolution: '1280x720',
-        frameRate: 24
-      },
-
       qualityPresets: {
         high: { resolution: '1920x1080', frameRate: 30, label: '高清' },
         medium: { resolution: '1280x720', frameRate: 24, label: '标清' },
         low: { resolution: '854x480', frameRate: 20, label: '流畅' }
       },
-      currentQuality: 'medium',
+      currentQuality: 'high',
       videoFitMode: 'contain',
 
       isMobile: false,
@@ -620,17 +615,9 @@ export default {
         this.connectionStatus = 'connecting';
         this.statusText = '正在建立连接...';
 
-        const preset = this.qualityPresets[this.currentQuality] || this.qualityPresets.medium;
-        const [width, height] = preset.resolution.split('x').map(Number);
-        const constraints = {
-          width,
-          height,
-          frameRate: preset.frameRate
-        };
+        console.log('初始连接不发送视频质量约束，交由设备端按最高能力推流');
 
-        console.log('使用初始视频约束:', constraints);
-
-        await this.webrtcManager.start(constraints);
+        await this.webrtcManager.start();
         this.$message.success('正在建立连接...');
       } catch (e) {
         console.error('开始投屏失败:', e);

@@ -35,8 +35,8 @@ class WebRTCManager(private val context: Context) {
     private var screenCaptureIntent: Intent? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var peerConnectionFactory: PeerConnectionFactory? = null
-    private var requestedCaptureConfig = CaptureConfig()
-    private var activeCaptureConfig = CaptureConfig()
+    private var requestedCaptureConfig = CaptureConfig.unconstrained()
+    private var activeCaptureConfig = CaptureConfig.unconstrained()
     private var localIceCandidateStats = mutableMapOf<String, Int>()
     private var remoteIceCandidateStats = mutableMapOf<String, Int>()
 
@@ -455,9 +455,11 @@ class WebRTCManager(private val context: Context) {
         var optimizedSdp = sdp
         
         val maxBitrate = when {
-            activeCaptureConfig.height >= 1080 -> 8000
-            activeCaptureConfig.height >= 720 -> 4500
-            else -> 2500
+            activeCaptureConfig.height >= 2160 -> 30000
+            activeCaptureConfig.height >= 1440 -> 20000
+            activeCaptureConfig.height >= 1080 -> 16000
+            activeCaptureConfig.height >= 720 -> 10000
+            else -> 6000
         }
         val minBitrate = maxBitrate / 3
         val startBitrate = maxBitrate * 2 / 3
@@ -873,9 +875,9 @@ class WebRTCManager(private val context: Context) {
     }
 
     private fun parseCaptureConfig(constraints: com.google.gson.JsonObject): CaptureConfig {
-        val width = constraints.get("width")?.asInt ?: 1280
-        val height = constraints.get("height")?.asInt ?: 720
-        val frameRate = constraints.get("frameRate")?.asInt ?: 24
+        val width = constraints.get("width")?.asInt ?: 0
+        val height = constraints.get("height")?.asInt ?: 0
+        val frameRate = constraints.get("frameRate")?.asInt ?: 0
         return CaptureConfig(width = width, height = height, frameRate = frameRate)
     }
 
@@ -1099,30 +1101,34 @@ class WebRTCManager(private val context: Context) {
     )
 
     data class CaptureConfig(
-        val width: Int = 1280,
-        val height: Int = 720,
-        val frameRate: Int = 24
+        val width: Int = 0,
+        val height: Int = 0,
+        val frameRate: Int = 0
     ) {
         fun resolve(displayInfo: DisplayInfo): CaptureConfig {
-            val safeFrameRate = frameRate.coerceIn(15, 30)
+            val safeFrameRate = if (frameRate > 0) frameRate else 60
             val displayLongSide = maxOf(displayInfo.width, displayInfo.height)
             val displayShortSide = minOf(displayInfo.width, displayInfo.height)
-            val requestedLongSide = maxOf(width, height).coerceIn(854, displayLongSide)
+            val requestedLongSide = maxOf(width, height).takeIf { it > 0 } ?: displayLongSide
             val aspectRatio = displayShortSide.toDouble() / displayLongSide.toDouble()
             val resolvedShortSide = ((requestedLongSide * aspectRatio) / 2.0).roundToInt() * 2
             return if (displayInfo.height >= displayInfo.width) {
                 CaptureConfig(
-                    width = resolvedShortSide.coerceAtLeast(480),
+                    width = resolvedShortSide.coerceAtLeast(2),
                     height = requestedLongSide,
                     frameRate = safeFrameRate
                 )
             } else {
                 CaptureConfig(
                     width = requestedLongSide,
-                    height = resolvedShortSide.coerceAtLeast(480),
+                    height = resolvedShortSide.coerceAtLeast(2),
                     frameRate = safeFrameRate
                 )
             }
+        }
+
+        companion object {
+            fun unconstrained(): CaptureConfig = CaptureConfig()
         }
     }
 

@@ -43,11 +43,8 @@ export default class WebRTCManager {
     this.connectionState = 'disconnected'; // disconnected, connecting, connected
     
     // 视频约束配置（用于重新协商）
-    this.videoConstraints = {
-      width: 1920,
-      height: 1080,
-      frameRate: 60
-    };
+    // 初次连接默认不主动约束，由设备端按自身最高能力推流。
+    this.videoConstraints = null;
     
     // 事件回调
     this.callbacks = {
@@ -395,14 +392,23 @@ export default class WebRTCManager {
       await this.peerConnection.setLocalDescription(offer);
       
       // 通过 MQTT 发送 Offer，包含视频约束
-      this.sendSignaling({
+      const signalingPayload = {
         type: 'offer',
         deviceName: this.deviceName,
-        offer: offer,
-        videoConstraints: this.videoConstraints
-      });
-      
-      console.log('📤 发送给设备的视频约束:', JSON.stringify(this.videoConstraints, null, 2));
+        offer: offer
+      };
+
+      if (this.videoConstraints) {
+        signalingPayload.videoConstraints = this.videoConstraints;
+      }
+
+      this.sendSignaling(signalingPayload);
+
+      if (this.videoConstraints) {
+        console.log('📤 发送给设备的视频约束:', JSON.stringify(this.videoConstraints, null, 2));
+      } else {
+        console.log('📤 初始 offer 未携带 videoConstraints，由设备端自行决定推流质量');
+      }
       
       
       return true;
@@ -537,7 +543,7 @@ export default class WebRTCManager {
     }
     
     console.log('✓ SDP 已优化（高质量高帧率低延迟模式 - 20Mbps, High Profile）');
-    console.log('当前视频约束:', this.videoConstraints);
+    console.log('当前视频约束:', this.videoConstraints || '未设置');
     return optimizedSDP;
   }
   
