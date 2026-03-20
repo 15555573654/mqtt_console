@@ -49,12 +49,6 @@
             @touchcancel="cancelGesture"
           ></video>
           
-          <!-- 坐标网格覆盖层 -->
-          <div v-if="showGrid && isStreaming" class="coordinate-grid" ref="coordinateGrid">
-            <div class="grid-lines"></div>
-            <div class="grid-labels"></div>
-          </div>
-          
           <div v-if="!isStreaming" class="stream-placeholder">
             <i class="el-icon-loading" v-if="connectionStatus === 'connecting'"></i>
             <i class="el-icon-video-camera" v-else></i>
@@ -67,16 +61,7 @@
           <div class="toolbar-item" @click.stop="captureScreenshot" :class="{ disabled: !isStreaming }" title="截图">
             <i class="el-icon-picture"></i>
           </div>
-          <div class="toolbar-item" @click.stop="toggleCalibration" :class="{ disabled: !isStreaming, active: calibrationMode }" title="坐标校准">
-            <i class="el-icon-aim"></i>
-          </div>
-          <div class="toolbar-item" @click.stop="toggleGrid" :class="{ disabled: !isStreaming, active: showGrid }" title="显示网格">
-            <i class="el-icon-menu"></i>
-          </div>
-          <div class="toolbar-item" @click.stop="handleRefresh" :class="{ disabled: !mqttClient }" title="刷新">
-            <i class="el-icon-refresh"></i>
-          </div>
-          <div class="toolbar-item" @click.stop="forceReconnect" :class="{ disabled: !webrtcManager }" title="重新连接">
+          <div class="toolbar-item" @click.stop="reconnectScreencast" :class="{ disabled: !mqttClient }" title="重新连接">
             <i class="el-icon-connection"></i>
           </div>
 
@@ -239,16 +224,7 @@ export default {
       lastTouchMoveSentAt: 0,
       lastTouchMoveX: 0,
       lastTouchMoveY: 0,
-      pendingSingleTapTimer: null,
-      pendingTap: null,
       lastPointerType: 'mouse',
-      
-      // 校准模式
-      calibrationMode: false,
-      calibrationPoints: [],
-      
-      // 网格显示
-      showGrid: false,
       
       // 调试模式
       debugMode: false,
@@ -296,21 +272,6 @@ export default {
     
     // 添加键盘事件监听
     document.addEventListener('keydown', this.handleKeyDown);
-    
-    // 监听窗口大小变化，重新绘制网格
-    this.resizeObserver = new ResizeObserver(() => {
-      if (this.showGrid) {
-        this.$nextTick(() => {
-          this.drawGrid();
-        });
-      }
-    });
-  },
-  mounted() {
-    // 开始观察视频容器的大小变化
-    if (this.resizeObserver && this.$refs.remoteVideo) {
-      this.resizeObserver.observe(this.$refs.remoteVideo);
-    }
   },
 
   beforeDestroy() {
@@ -319,11 +280,6 @@ export default {
     document.removeEventListener('mouseup', this.handleMouseUp);
     document.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('resize', this.handleViewportResize);
-    
-    // 停止观察大小变化
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-    }
   },
   methods: {
     getEffectiveDeviceResolution() {
@@ -616,10 +572,6 @@ export default {
             this.initialResolutionReceived = true;
             this.$nextTick(() => {
               this.autoResizeDialog();
-              // 如果网格正在显示，重新绘制
-              if (this.showGrid) {
-                this.drawGrid();
-              }
             });
           }
           break;
@@ -924,38 +876,6 @@ export default {
     },
 
 
-    /** 强制重新连接 */
-    forceReconnect() {
-      console.log('🔄 强制重新连接WebRTC...');
-      
-      if (this.webrtcManager) {
-        // 使用WebRTC管理器的强制重连方法
-        this.webrtcManager.forceReconnect();
-        
-        // 重置本地状态
-        this.connectionStatus = 'disconnected';
-        this.isStreaming = false;
-        this.statusText = '准备重新连接...';
-        
-        // 清除视频
-        if (this.$refs.remoteVideo) {
-          const video = this.$refs.remoteVideo;
-          video.pause();
-          video.srcObject = null;
-          video.src = '';
-          video.load();
-        }
-        
-        // 延迟一秒后重新开始连接
-        setTimeout(() => {
-          console.log('🔄 开始重新建立连接...');
-          this.startScreencast();
-        }, 1000);
-        
-        this.$message.info('正在重新建立连接...');
-      }
-    },
-
     /** 处理 Answer */
     async handleAnswer(answer) {
       console.log('📥 ScreencastDialog收到Answer:', answer);
@@ -1063,25 +983,26 @@ export default {
       this.$message.success('已发送屏幕共享请求');
     },
 
-    /** 刷新连接 */
-    async handleRefresh() {
+    /** 重新连接 */
+    async reconnectScreencast() {
       if (!this.mqttClient) {
         this.$message.warning('MQTT未连接');
         return;
       }
 
       try {
-        // 停止当前连接
+        if (this.webrtcManager) {
+          this.webrtcManager.forceReconnect();
+        }
+
         await this.stopScreencast({ notifyDevice: false });
-
-        // 等待一小段时间确保资源释放
         await new Promise(resolve => setTimeout(resolve, 500));
-
-        // 重新开始投屏
+        this.statusText = '准备重新连接...';
+        this.connectionStatus = 'connecting';
         await this.startScreencast();
       } catch (error) {
-        console.error('刷新连接失败:', error);
-        this.$message.error('刷新连接失败: ' + error.message);
+        console.error('重新连接失败:', error);
+        this.$message.error('重新连接失败: ' + error.message);
       }
     },
 
@@ -1265,7 +1186,6 @@ export default {
       this.stopStatsMonitoring();
       this.releaseHeldTouch();
       this.cancelLongPressTimer();
-      this.cancelPendingTap();
 
       if (this.webrtcManager) {
         this.webrtcManager.cleanup();
@@ -1326,201 +1246,6 @@ export default {
       // 实际的点击/滑动逻辑在 mouseUp 事件中处理
     },
 
-    /** 添加校准点 */
-    addCalibrationPoint(event, coords) {
-      const rect = this.$refs.remoteVideo.getBoundingClientRect();
-      const relativeX = (event.clientX - rect.left) / rect.width;
-      const relativeY = (event.clientY - rect.top) / rect.height;
-      
-      const calibrationPoint = {
-        screenX: coords.x,
-        screenY: coords.y,
-        videoRelativeX: relativeX,
-        videoRelativeY: relativeY,
-        timestamp: Date.now()
-      };
-      
-      this.calibrationPoints.push(calibrationPoint);
-      
-      console.log(`校准点 ${this.calibrationPoints.length}:`, calibrationPoint);
-      this.$message.success(`已记录校准点 ${this.calibrationPoints.length}/4`);
-      
-      if (this.calibrationPoints.length >= 4) {
-        this.analyzeCalibration();
-      }
-    },
-
-    /** 分析校准结果 */
-    analyzeCalibration() {
-      console.log('校准分析结果:');
-      this.calibrationPoints.forEach((point, index) => {
-        console.log(`点 ${index + 1}: 视频相对位置(${point.videoRelativeX.toFixed(3)}, ${point.videoRelativeY.toFixed(3)}) -> 设备坐标(${point.screenX}, ${point.screenY})`);
-      });
-      
-      // 计算校准精度
-      const corners = [
-        { name: '左上角', expectedX: 0, expectedY: 0 },
-        { name: '右上角', expectedX: 1, expectedY: 0 },
-        { name: '左下角', expectedX: 0, expectedY: 1 },
-        { name: '右下角', expectedX: 1, expectedY: 1 }
-      ];
-      
-      let totalError = 0;
-      this.calibrationPoints.forEach((point, index) => {
-        if (corners[index]) {
-          const errorX = Math.abs(point.videoRelativeX - corners[index].expectedX);
-          const errorY = Math.abs(point.videoRelativeY - corners[index].expectedY);
-          const error = Math.sqrt(errorX * errorX + errorY * errorY);
-          totalError += error;
-          console.log(`${corners[index].name} 误差: ${(error * 100).toFixed(1)}%`);
-        }
-      });
-      
-      const avgError = (totalError / this.calibrationPoints.length * 100).toFixed(1);
-      this.$message.info(`校准完成，平均误差: ${avgError}%`);
-      
-      this.calibrationMode = false;
-      this.calibrationPoints = [];
-    },
-
-    /** 切换网格显示 */
-    toggleGrid() {
-      this.showGrid = !this.showGrid;
-      
-      if (this.showGrid) {
-        this.$message.info('网格已显示，可以验证坐标一致性');
-        this.$nextTick(() => {
-          this.drawGrid();
-        });
-      } else {
-        this.$message.info('网格已隐藏');
-      }
-    },
-
-    /** 绘制坐标网格 */
-    drawGrid() {
-      const video = this.$refs.remoteVideo;
-      const gridContainer = this.$refs.coordinateGrid;
-      
-      if (!video || !gridContainer) {
-        return;
-      }
-
-      // 优先使用从Android端获取的真实设备分辨率
-      const deviceResolution = this.getEffectiveDeviceResolution();
-      if (!deviceResolution) {
-        console.warn('No device resolution available for grid rendering');
-        return;
-      }
-
-      const deviceWidth = deviceResolution.width;
-      const deviceHeight = deviceResolution.height;
-
-      // 清空现有网格
-      const gridLines = gridContainer.querySelector('.grid-lines');
-      const gridLabels = gridContainer.querySelector('.grid-labels');
-      gridLines.innerHTML = '';
-      gridLabels.innerHTML = '';
-      const { width: videoContentWidth, height: videoContentHeight, offsetX, offsetY } = this.getVideoContentRect();
-
-      // 绘制网格线（4x4网格）
-      const gridSize = 4;
-      for (let i = 0; i <= gridSize; i++) {
-        // 垂直线
-        const vLine = document.createElement('div');
-        vLine.style.cssText = `
-          position: absolute;
-          left: ${offsetX + (i * videoContentWidth / gridSize)}px;
-          top: ${offsetY}px;
-          width: 1px;
-          height: ${videoContentHeight}px;
-          background: rgba(255, 255, 255, 0.5);
-          pointer-events: none;
-        `;
-        gridLines.appendChild(vLine);
-
-        // 水平线
-        const hLine = document.createElement('div');
-        hLine.style.cssText = `
-          position: absolute;
-          left: ${offsetX}px;
-          top: ${offsetY + (i * videoContentHeight / gridSize)}px;
-          width: ${videoContentWidth}px;
-          height: 1px;
-          background: rgba(255, 255, 255, 0.5);
-          pointer-events: none;
-        `;
-        gridLines.appendChild(hLine);
-      }
-
-      // 添加坐标标签 - 使用设备分辨率
-      for (let row = 0; row < gridSize; row++) {
-        for (let col = 0; col < gridSize; col++) {
-          const x = Math.round((col + 0.5) * deviceWidth / gridSize);
-          const y = Math.round((row + 0.5) * deviceHeight / gridSize);
-          
-          const label = document.createElement('div');
-          label.textContent = `${x},${y}`;
-          label.style.cssText = `
-            position: absolute;
-            left: ${offsetX + (col + 0.5) * videoContentWidth / gridSize - 20}px;
-            top: ${offsetY + (row + 0.5) * videoContentHeight / gridSize - 8}px;
-            color: white;
-            font-size: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 2px 4px;
-            border-radius: 2px;
-            pointer-events: none;
-            text-align: center;
-            min-width: 40px;
-          `;
-          gridLabels.appendChild(label);
-        }
-      }
-    },
-
-    /** 显示坐标信息（调试用） */
-    showCoordinateInfo(event, coords) {
-      // 优先使用从Android端获取的真实设备分辨率
-      const deviceResolution = this.getEffectiveDeviceResolution();
-      if (!deviceResolution) {
-        return;
-      }
-
-      const deviceWidth = deviceResolution.width;
-      const deviceHeight = deviceResolution.height;
-
-      // 计算百分比位置 - 基于设备分辨率
-      const percentX = ((coords.x / deviceWidth) * 100).toFixed(1);
-      const percentY = ((coords.y / deviceHeight) * 100).toFixed(1);
-
-      // 创建信息显示框
-      const infoBox = document.createElement('div');
-      infoBox.textContent = `${coords.x},${coords.y} (${percentX}%,${percentY}%)`;
-      infoBox.style.cssText = `
-        position: fixed;
-        left: ${event.clientX + 10}px;
-        top: ${event.clientY - 30}px;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        pointer-events: none;
-        z-index: 10000;
-        white-space: nowrap;
-      `;
-
-      document.body.appendChild(infoBox);
-
-      // 2秒后移除
-      setTimeout(() => {
-        if (infoBox.parentNode) {
-          infoBox.parentNode.removeChild(infoBox);
-        }
-      }, 2000);
-    },
-
     /** 处理键盘事件 */
     handleKeyDown(event) {
       // 只在投屏对话框打开时处理
@@ -1532,12 +1257,6 @@ export default {
         this.debugMode = !this.debugMode;
         this.$message.info(`调试模式已${this.debugMode ? '开启' : '关闭'}`);
         console.log(`🔧 调试模式: ${this.debugMode ? 'ON' : 'OFF'}`);
-      }
-      
-      // Ctrl+G 切换网格显示
-      if (event.ctrlKey && event.key === 'g') {
-        event.preventDefault();
-        this.toggleGrid();
       }
     },
 
@@ -1630,19 +1349,17 @@ export default {
       this.lastTouchMoveX = this.gestureStartX;
       this.lastTouchMoveY = this.gestureStartY;
 
-      if (!this.calibrationMode) {
-        this.sendTouchEvent('touchDown', {
-          x: this.gestureStartX,
-          y: this.gestureStartY
-        });
-        this.touchDownSent = true;
-        this.longPressTimer = setTimeout(() => {
-          if (!this.isDraggingVideo || this.longPressTriggered) {
-            return;
-          }
-          this.longPressTriggered = true;
-        }, 420);
-      }
+      this.sendTouchEvent('touchDown', {
+        x: this.gestureStartX,
+        y: this.gestureStartY
+      });
+      this.touchDownSent = true;
+      this.longPressTimer = setTimeout(() => {
+        if (!this.isDraggingVideo || this.longPressTriggered) {
+          return;
+        }
+        this.longPressTriggered = true;
+      }, 420);
     },
 
     updateGesture(pointEvent, pointerType) {
@@ -1718,16 +1435,6 @@ export default {
 
         this.releaseHeldTouch(coords.x, coords.y);
         this.showSwipeTrail(gesturePath);
-        if (this.calibrationMode) {
-          this.$message.info('Calibration mode does not send swipe control commands');
-        }
-        this.cancelGesture();
-        return;
-      }
-
-      if (this.calibrationMode) {
-        this.showClickMarker(pointEvent.clientX, pointEvent.clientY);
-        this.addCalibrationPoint(pointEvent, coords);
         this.cancelGesture();
         return;
       }
@@ -1736,53 +1443,6 @@ export default {
       this.showClickMarker(this.gestureStartClientX, this.gestureStartClientY);
 
       this.isDraggingVideo = false;
-    },
-
-    queueTap(coords, pointEvent) {
-      const now = Date.now();
-      const maxInterval = 260;
-      const maxDistance = 28;
-
-      if (this.pendingTap) {
-        const isNear = Math.hypot(coords.x - this.pendingTap.x, coords.y - this.pendingTap.y) <= maxDistance;
-        const isFast = now - this.pendingTap.timestamp <= maxInterval;
-        if (isNear && isFast) {
-          this.showClickMarker(pointEvent.clientX, pointEvent.clientY);
-          this.cancelPendingTap();
-          this.sendTouchEvent('doubleClick', { x: coords.x, y: coords.y });
-          return;
-        }
-      }
-
-      this.cancelPendingTap();
-      this.pendingTap = {
-        x: coords.x,
-        y: coords.y,
-        clientX: pointEvent.clientX,
-        clientY: pointEvent.clientY,
-        timestamp: now
-      };
-      this.pendingSingleTapTimer = setTimeout(() => {
-        if (!this.pendingTap) {
-          return;
-        }
-        this.showClickMarker(this.pendingTap.clientX, this.pendingTap.clientY);
-        this.sendTouchEvent('click', { x: this.pendingTap.x, y: this.pendingTap.y });
-        this.showCoordinateInfo(
-          { clientX: this.pendingTap.clientX, clientY: this.pendingTap.clientY },
-          { x: this.pendingTap.x, y: this.pendingTap.y }
-        );
-        this.pendingTap = null;
-        this.pendingSingleTapTimer = null;
-      }, maxInterval);
-    },
-
-    cancelPendingTap() {
-      if (this.pendingSingleTapTimer) {
-        clearTimeout(this.pendingSingleTapTimer);
-        this.pendingSingleTapTimer = null;
-      }
-      this.pendingTap = null;
     },
 
     cancelLongPressTimer() {
@@ -1949,18 +1609,6 @@ export default {
           svg.parentNode.removeChild(svg);
         }
       }, 1500);
-    },
-
-    /** 切换校准模式 */
-    toggleCalibration() {
-      this.calibrationMode = !this.calibrationMode;
-      this.calibrationPoints = [];
-      
-      if (this.calibrationMode) {
-        this.$message.info('校准模式已开启，点击视频中的四个角落进行校准');
-      } else {
-        this.$message.info('校准模式已关闭');
-      }
     },
 
     /** 获取视频坐标并转换为设备坐标 */
@@ -2286,33 +1934,6 @@ export default {
   width: 100%;
   height: 100%;
   object-fit: contain; /* 完整显示视频内容，保持宽高比，不裁剪 */
-}
-
-/* 坐标网格覆盖层 */
-.coordinate-grid {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 5;
-}
-
-.grid-lines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.grid-labels {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
 }
 
 .stream-placeholder {
