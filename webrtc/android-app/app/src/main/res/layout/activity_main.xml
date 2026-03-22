@@ -36,11 +36,12 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:hint="服务器地址">
+
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etMqttHost"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="192.168.1.132" />
+                        android:text="103.85.227.223" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.textfield.TextInputLayout

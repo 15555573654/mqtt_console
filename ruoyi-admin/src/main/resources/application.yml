@@ -137,3 +137,17 @@ xss:
   excludes: /system/notice
   # 匹配链接
   urlPatterns: /system/*,/monitor/*,/tool/*
+
+# WebRTC TURN 配置
+webrtc:
+  turn:
+    # 是否启用动态 TURN 凭证下发
+    enabled: true
+    # Coturn static-auth-secret / TURN_SECRET
+    secret: q65742472
+    # realm 仅用于返回给调用方做展示或排障，不参与密码生成
+    realm: 103.85.227.223
+    # 临时凭证有效期，单位秒
+    ttlSeconds: 3600
+    # TURN URI 列表，多个地址使用英文逗号分隔
+    urls: turn:103.85.227.223:3478?transport=udp,turn:103.85.227.223:3478?transport=tcp

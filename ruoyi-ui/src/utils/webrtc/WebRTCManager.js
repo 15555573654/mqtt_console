@@ -2,37 +2,26 @@
  * WebRTC 连接管理器
  * 负责处理 WebRTC 连接、信令交换、媒体流管理等
  */
+import { getTurnCredentials } from '@/api/webrtc/turn';
+
 export default class WebRTCManager {
   constructor(options = {}) {
     this.deviceName = options.deviceName || '';
     this.mqttClient = options.mqttClient || null;
     this.username = options.username || '';
     
-    // ICE 服务器配置 - 优化版本
-    this.iceServers = options.iceServers || [
-      // Google STUN 服务器
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      // 公共 TURN 服务器（用于 NAT 穿透）
-      {
-        urls: 'turn:openrelay.metered.ca:80',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      },
-      {
-        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-      }
-    ];
+    // ICE 服务器配置优先使用业务后端下发的动态 TURN，失败时回退到保底 TURN
+    this.iceServers = Array.isArray(options.iceServers) ? options.iceServers : [];
+    this.fallbackIceServers = Array.isArray(options.fallbackIceServers) && options.fallbackIceServers.length > 0
+      ? options.fallbackIceServers
+      : [
+          {
+            urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443?transport=tcp'],
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+          }
+        ];
+    this.turnConfigSource = 'unknown';
     
     // WebRTC 对象
     this.peerConnection = null;
@@ -76,6 +65,48 @@ export default class WebRTCManager {
     if (config.deviceName) this.deviceName = config.deviceName;
     if (config.mqttClient) this.mqttClient = config.mqttClient;
     if (config.username) this.username = config.username;
+    if (Array.isArray(config.iceServers)) this.iceServers = config.iceServers;
+    if (Array.isArray(config.fallbackIceServers) && config.fallbackIceServers.length > 0) {
+      this.fallbackIceServers = config.fallbackIceServers;
+    }
+  }
+
+  async refreshIceServers() {
+    try {
+      const response = await getTurnCredentials();
+      const iceServer = response?.data?.iceServer;
+      const urls = iceServer?.urls;
+      const expiresAt = response?.data?.expiresAt;
+      const credentialUsername = iceServer?.username;
+
+      if (!iceServer || !Array.isArray(urls) || urls.length === 0) {
+        throw new Error('未获取到可用的 TURN 配置');
+      }
+
+      this.iceServers = [
+        {
+          urls,
+          username: iceServer.username,
+          credential: iceServer.credential
+        }
+      ];
+      this.turnConfigSource = 'backend-dynamic-turn';
+
+      console.log('>>> 已加载动态 TURN 凭证:', urls.join(', '));
+      console.log('>>> TURN 凭证来源: 后端动态接口 /webrtc/turn/credentials');
+      console.log('>>> TURN 用户名(临时):', credentialUsername);
+      if (expiresAt) {
+        console.log('>>> TURN 凭证过期时间(Unix):', expiresAt);
+      }
+      return this.iceServers;
+    } catch (error) {
+      const fallbackUrls = this.fallbackIceServers.map(server => server.urls).flat().join(', ');
+      console.error('>>> 后端 TURN 不可用，切换到保底 TURN:', error);
+      console.error('>>> 保底 TURN 地址:', fallbackUrls);
+      this.iceServers = this.fallbackIceServers;
+      this.turnConfigSource = 'fallback-turn';
+      return this.iceServers;
+    }
   }
   
   /**
@@ -369,6 +400,8 @@ export default class WebRTCManager {
       if (videoConstraints) {
         this.videoConstraints = { ...videoConstraints };
       }
+
+      await this.refreshIceServers();
       
       // 创建 PeerConnection
       await this.createPeerConnection();
@@ -395,7 +428,8 @@ export default class WebRTCManager {
       const signalingPayload = {
         type: 'offer',
         deviceName: this.deviceName,
-        offer: offer
+        offer: offer,
+        turnConfig: this.buildTurnConfigPayload()
       };
 
       if (this.videoConstraints) {
@@ -420,6 +454,24 @@ export default class WebRTCManager {
       }
       throw error;
     }
+  }
+
+  buildTurnConfigPayload() {
+    const turnServers = this.iceServers
+      .filter(server => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+        return urls.some(url => typeof url === 'string' && url.startsWith('turn:'));
+      })
+      .map(server => ({
+        urls: Array.isArray(server.urls) ? server.urls : [server.urls],
+        username: server.username,
+        credential: server.credential
+      }));
+
+    return {
+      source: this.turnConfigSource || 'web-offer',
+      servers: turnServers
+    };
   }
   
   /**

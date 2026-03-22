@@ -349,7 +349,7 @@ export default {
       currentUsername: '',
       connecting: false,
       connectionForm: {
-        mqttHost: '192.168.1.132',
+        mqttHost: '103.85.227.223',
         mqttPort: '8083',
         username: '',
         password: ''

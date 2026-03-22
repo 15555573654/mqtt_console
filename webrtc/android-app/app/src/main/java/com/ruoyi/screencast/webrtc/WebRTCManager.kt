@@ -12,6 +12,9 @@ import android.content.pm.ActivityInfo
 import android.view.Surface
 import android.view.WindowManager
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.ruoyi.screencast.mqtt.MqttManager
 import com.ruoyi.screencast.service.ScreenCaptureService
 import org.webrtc.*
@@ -31,6 +34,7 @@ class WebRTCManager(private val context: Context) {
     private var mqttManager: MqttManager? = null
     private var username: String = ""
     private var deviceName: String = ""
+    private var pushedIceServers: List<PeerConnection.IceServer> = emptyList()
     
     private var statusCallback: ((String) -> Unit)? = null
     private var logCallback: ((String) -> Unit)? = null
@@ -72,7 +76,7 @@ class WebRTCManager(private val context: Context) {
         username = user
         deviceName = device
     }
-    
+
     fun setStatusCallback(callback: (String) -> Unit) {
         statusCallback = callback
     }
@@ -104,7 +108,7 @@ class WebRTCManager(private val context: Context) {
                 sendVideoResolution(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
                 statusCallback?.invoke("已启动")
                 pendingOffer?.let { offer ->
-                    handleOffer(offer)
+                    processOfferAsync(offer)
                     pendingOffer = null
                 }
                 return
@@ -134,7 +138,7 @@ class WebRTCManager(private val context: Context) {
             logCallback?.invoke("Capture started: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
             statusCallback?.invoke("已启动")
             pendingOffer?.let { offer ->
-                handleOffer(offer)
+                processOfferAsync(offer)
                 pendingOffer = null
             }
         } catch (e: Exception) {
@@ -204,6 +208,9 @@ class WebRTCManager(private val context: Context) {
                         requestedCaptureConfig = parseCaptureConfig(constraints)
                         logCallback?.invoke("收到前端采集期望: ${requestedCaptureConfig.width}x${requestedCaptureConfig.height}@${requestedCaptureConfig.frameRate}fps")
                     }
+                    jsonObject.getAsJsonObject("turnConfig")?.let { turnConfig ->
+                        pushedIceServers = parseTurnConfig(turnConfig)
+                    }
                     val offerObj = jsonObject.getAsJsonObject("offer")
                     if (offerObj != null) {
                         val sdpType = offerObj.get("type")?.asString
@@ -216,7 +223,7 @@ class WebRTCManager(private val context: Context) {
                                 else -> SessionDescription.Type.OFFER
                             }
                             val offer = SessionDescription(sessionDescType, sdp)
-                            handleOffer(offer)
+                            processOfferAsync(offer)
                         }
                     }
                 }
@@ -264,27 +271,10 @@ class WebRTCManager(private val context: Context) {
             
             val factory = createPeerConnectionFactory()
             
-            val iceServers = listOf(
-                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                    .setUsername("openrelayproject")
-                    .setPassword("openrelayproject")
-                    .createIceServer(),
-                PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80?transport=tcp")
-                    .setUsername("openrelayproject")
-                    .setPassword("openrelayproject")
-                    .createIceServer(),
-                PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                    .setUsername("openrelayproject")
-                    .setPassword("openrelayproject")
-                    .createIceServer(),
-                PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-                    .setUsername("openrelayproject")
-                    .setPassword("openrelayproject")
-                    .createIceServer()
-            )
+            val iceServers = pushedIceServers
+            if (iceServers.isEmpty()) {
+                throw IllegalStateException("未收到 Web 端推送的 TURN 配置")
+            }
             
             val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
                 // 优化网络传输
@@ -448,6 +438,43 @@ class WebRTCManager(private val context: Context) {
         } catch (e: Exception) {
             logCallback?.invoke("处理Offer失败: ${e.message}")
         }
+    }
+
+    private fun processOfferAsync(offer: SessionDescription) {
+        Thread {
+            handleOffer(offer)
+        }.start()
+    }
+
+    private fun parseTurnConfig(turnConfig: JsonObject): List<PeerConnection.IceServer> {
+        val source = turnConfig.get("source")?.asString ?: "unknown"
+        val servers = turnConfig.getAsJsonArray("servers") ?: JsonArray()
+        val parsedServers = mutableListOf<PeerConnection.IceServer>()
+
+        servers.forEach { element ->
+            val server = element?.asJsonObject ?: return@forEach
+            val credentialUsername = server.get("username")?.asString.orEmpty()
+            val credential = server.get("credential")?.asString.orEmpty()
+            val urls = server.getAsJsonArray("urls") ?: JsonArray()
+            urls.forEach { urlElement ->
+                val url = urlElement?.asString ?: return@forEach
+                parsedServers.add(
+                    PeerConnection.IceServer.builder(url)
+                        .setUsername(credentialUsername)
+                        .setPassword(credential)
+                        .createIceServer()
+                )
+            }
+        }
+
+        logCallback?.invoke("TURN 配置来源: $source")
+        if (parsedServers.isNotEmpty()) {
+            logCallback?.invoke("已接收 Web 端推送的 TURN 地址: ${parsedServers.joinToString { server -> server.urls.toString() }}")
+        } else {
+            logCallback?.invoke("⚠️ Web 端未推送可用的 TURN 地址")
+        }
+
+        return parsedServers
     }
     
     private fun handleIceCandidate(candidate: IceCandidate) {
@@ -1255,4 +1282,3 @@ class WebRTCManager(private val context: Context) {
         val y: Float
     )
 }
-
