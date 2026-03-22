@@ -258,7 +258,8 @@ export default {
       initialResolutionReceived: false,
       feedbackTopic: '',
       feedbackMessageHandler: null,
-      pendingStreamId: ''
+      pendingStreamId: '',
+      isReconnecting: false
     };
   },
   computed: {
@@ -368,18 +369,18 @@ export default {
             // 设置视频源
             video.srcObject = stream;
 
-            // 优化视频播放设置 - 优先保证自动播放成功
+            // 优化视频播放设置，同时允许远端音频正常输出
             video.playsInline = true;
-            video.muted = true;
-            video.defaultMuted = true;
+            video.muted = false;
+            video.defaultMuted = false;
             video.autoplay = true;
-            video.volume = 0;
+            video.volume = 1;
 
             if (video.hasAttribute) {
               video.setAttribute('playsinline', '');
               video.setAttribute('webkit-playsinline', '');
-              video.setAttribute('muted', '');
               video.setAttribute('autoplay', '');
+              video.removeAttribute('muted');
             }
 
             try {
@@ -416,7 +417,7 @@ export default {
                     }
                   }, 300);
                 } else if (err.name === 'NotAllowedError') {
-                  this.$message.warning('浏览器阻止了自动播放，请点击视频区域继续播放');
+                  this.$message.warning('浏览器阻止了带声音自动播放，请点击视频区域继续播放');
                 }
               } finally {
                 if (this.pendingStreamId === stream.id) {
@@ -1102,11 +1103,13 @@ export default {
         return;
       }
 
-      try {
-        if (this.webrtcManager) {
-          this.webrtcManager.forceReconnect();
-        }
+      if (this.isReconnecting) {
+        console.warn('重连请求已在进行中，忽略本次重复触发');
+        return;
+      }
 
+      this.isReconnecting = true;
+      try {
         await this.stopScreencast({ notifyDevice: false });
         await new Promise(resolve => setTimeout(resolve, 500));
         this.statusText = '准备重新连接...';
@@ -1115,6 +1118,8 @@ export default {
       } catch (error) {
         console.error('重新连接失败:', error);
         this.$message.error('重新连接失败: ' + error.message);
+      } finally {
+        this.isReconnecting = false;
       }
     },
 
@@ -1291,6 +1296,7 @@ export default {
 
     /** 清理资源 */
     cleanup() {
+      this.isReconnecting = false;
       this.stopStatsMonitoring();
       this.releaseHeldTouch();
       this.cancelLongPressTimer();
