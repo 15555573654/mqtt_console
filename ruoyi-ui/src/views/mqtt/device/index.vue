@@ -48,7 +48,7 @@
       </el-col>
     </el-row>
 
-    <!-- 查询和连接表单 -->
+    <!-- 查询表单 -->
     <div class="query-connection-wrapper">
       <el-form :model="queryParams" ref="queryForm" size="small" :inline="!isMobile" v-show="showSearch" label-width="68px" class="query-form">
         <el-form-item label="设备名称" prop="deviceName">
@@ -75,43 +75,6 @@
         <el-form-item>
           <el-button type="primary" icon="el-icon-search" size="mini" @click="handleQuery">搜索</el-button>
           <el-button icon="el-icon-refresh" size="mini" @click="resetQuery">重置</el-button>
-        </el-form-item>
-      </el-form>
-
-      <!-- MQTT连接设置 -->
-      <el-form ref="connectionForm" :model="connectionForm" :rules="connectionRules" :inline="!isMobile" size="small" class="connection-form">
-        <el-form-item label="服务器状态" class="mobile-full-width">
-          <el-tag :type="isConnected ? 'success' : 'info'" size="medium">
-            {{ isConnected ? '已连接' : '未连接' }}
-          </el-tag>
-          <span v-if="isConnected" class="username-display">
-            <i class="el-icon-user"></i> {{ currentUsername }}
-          </span>
-        </el-form-item>
-        <el-form-item prop="username" class="mobile-full-width">
-          <el-input v-model="connectionForm.username" placeholder="用户名" :disabled="isConnected" :style="isMobile ? 'width: 100%' : 'width: 120px'" />
-        </el-form-item>
-        <el-form-item prop="password" class="mobile-full-width">
-          <el-input v-model="connectionForm.password" type="password" placeholder="密码" show-password :disabled="isConnected" :style="isMobile ? 'width: 100%' : 'width: 120px'" />
-        </el-form-item>
-        <el-form-item class="mobile-full-width">
-          <el-button
-            v-if="!isConnected"
-            type="primary"
-            size="small"
-            @click="handleConnect"
-            :loading="connecting"
-            :style="isMobile ? 'width: 100%' : ''"
-            v-hasPermi="['mqtt:connection:connect']"
-          >连接</el-button>
-          <el-button
-            v-else
-            type="danger"
-            size="small"
-            @click="handleDisconnect"
-            :style="isMobile ? 'width: 100%' : ''"
-            v-hasPermi="['mqtt:connection:disconnect']"
-          >断开</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -355,14 +318,6 @@ export default {
         username: '',
         password: ''
       },
-      connectionRules: {
-        username: [
-          { required: true, message: "用户名不能为空", trigger: "blur" }
-        ],
-        password: [
-          { required: true, message: "密码不能为空", trigger: "blur" }
-        ]
-      },
       // 实时设备数据（从MQTT接收）
       realtimeDevices: {},
       // 投屏控制相关
@@ -481,99 +436,81 @@ export default {
     },
     /** 连接MQTT */
     handleConnect() {
-      this.$refs["connectionForm"].validate(valid => {
-        if (valid) {
-          this.connecting = true;
+      if (!this.connectionForm.username || !this.connectionForm.password) {
+        return;
+      }
+      this.connecting = true;
 
-          const { mqttHost, mqttPort, username, password } = this.connectionForm;
-          const url = `ws://${mqttHost}:${mqttPort}/mqtt`;
+      const { mqttHost, mqttPort, username, password } = this.connectionForm;
+      const url = `ws://${mqttHost}:${mqttPort}/mqtt`;
 
-          const options = {
-            clientId: 'mqtt_web_' + username + '_' + Math.random().toString(16).substr(2, 8),
-            username: username,
-            password: password,
-            clean: true,
-            reconnectPeriod: 0, // 禁用自动重连，避免一直尝试
-            connectTimeout: 10000
-          };
+      const options = {
+        clientId: 'mqtt_web_' + username + '_' + Math.random().toString(16).substr(2, 8),
+        username: username,
+        password: password,
+        clean: true,
+        reconnectPeriod: 0, // 禁用自动重连，避免一直尝试
+        connectTimeout: 10000
+      };
 
-          try {
-            this.mqttClient = mqtt.connect(url, options);
+      try {
+        this.mqttClient = mqtt.connect(url, options);
 
-            // 连接成功
-            this.mqttClient.on('connect', () => {
-              this.isConnected = true;
-              this.currentUsername = username;
-              this.connecting = false;
-              this.saveConnectionConfig();
-              this.$modal.msgSuccess("MQTT连接成功");
+        // 连接成功
+        this.mqttClient.on('connect', () => {
+          this.isConnected = true;
+          this.currentUsername = username;
+          this.connecting = false;
+          this.saveConnectionConfig();
 
-              // 订阅主题
-              this.subscribeTopics(username);
-            });
+          // 订阅主题
+          this.subscribeTopics(username);
+        });
 
-            // 连接失败
-            this.mqttClient.on('error', (err) => {
-              console.error('MQTT连接错误:', err);
-              this.connecting = false;
-              this.isConnected = false;
+        // 连接失败
+        this.mqttClient.on('error', (err) => {
+          console.error('MQTT连接错误:', err);
+          this.connecting = false;
+          this.isConnected = false;
 
-              let errorMsg = "MQTT连接失败";
-              if (err.message) {
-                errorMsg += ": " + err.message;
-              }
-
-              // 常见错误提示
-              if (err.message && err.message.includes('ECONNREFUSED')) {
-                errorMsg = `连接被拒绝，请检查MQTT服务器地址和端口是否正确 (${mqttHost}:${mqttPort})`;
-              } else if (err.message && err.message.includes('timeout')) {
-                errorMsg = `连接超时，请检查MQTT服务器是否开启WebSocket支持 (${mqttHost}:${mqttPort})`;
-              }
-
-              this.$modal.msgError(errorMsg);
-
-              // 清理客户端
-              if (this.mqttClient) {
-                this.mqttClient.end(true);
-                this.mqttClient = null;
-              }
-            });
-
-            // 连接断开
-            this.mqttClient.on('close', () => {
-              this.isConnected = false;
-            });
-
-            // 离线事件
-            this.mqttClient.on('offline', () => {
-              this.connecting = false;
-              this.isConnected = false;
-            });
-
-            // 接收消息
-            this.mqttClient.on('message', (topic, message) => {
-              this.handleMqttMessage(topic, message.toString());
-            });
-
-            // 设置超时，如果10秒内没有连接成功，则取消
-            setTimeout(() => {
-              if (this.connecting) {
-                this.connecting = false;
-                this.$modal.msgError("连接超时，请检查MQTT服务器配置");
-                if (this.mqttClient) {
-                  this.mqttClient.end(true);
-                  this.mqttClient = null;
-                }
-              }
-            }, 10000);
-
-          } catch (err) {
-            console.error('创建MQTT客户端失败:', err);
-            this.connecting = false;
-            this.$modal.msgError("创建MQTT客户端失败: " + err.message);
+          // 清理客户端
+          if (this.mqttClient) {
+            this.mqttClient.end(true);
+            this.mqttClient = null;
           }
-        }
-      });
+        });
+
+        // 连接断开
+        this.mqttClient.on('close', () => {
+          this.isConnected = false;
+        });
+
+        // 离线事件
+        this.mqttClient.on('offline', () => {
+          this.connecting = false;
+          this.isConnected = false;
+        });
+
+        // 接收消息
+        this.mqttClient.on('message', (topic, message) => {
+          this.handleMqttMessage(topic, message.toString());
+        });
+
+        // 设置超时，如果10秒内没有连接成功，则取消
+        setTimeout(() => {
+          if (this.connecting) {
+            this.connecting = false;
+            if (this.mqttClient) {
+              this.mqttClient.end(true);
+              this.mqttClient = null;
+            }
+          }
+        }, 10000);
+
+      } catch (err) {
+        console.error('创建MQTT客户端失败:', err);
+        this.connecting = false;
+      }
     },
     /** 统一脚本状态 */
     normalizeScriptStatus(rawStatus) {
