@@ -8,8 +8,6 @@ import android.media.projection.MediaProjection
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.content.pm.ActivityInfo
 import android.view.Surface
 import android.view.WindowManager
@@ -48,7 +46,6 @@ class WebRTCManager(private val context: Context) {
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var requestedCaptureConfig = CaptureConfig.unconstrained()
     private var activeCaptureConfig = CaptureConfig.unconstrained()
-    private var lastDisplayInfo: DisplayInfo? = null
     private var localIceCandidateStats = mutableMapOf<String, Int>()
     private var remoteIceCandidateStats = mutableMapOf<String, Int>()
 
@@ -104,7 +101,6 @@ class WebRTCManager(private val context: Context) {
                 throw RuntimeException("ScreenCaptureService not running - MediaProjection requires foreground service")
             }
             val displayInfo = getDisplayInfo()
-            lastDisplayInfo = displayInfo
             activeCaptureConfig = requestedCaptureConfig.resolve(displayInfo)
             sendDeviceResolution(displayInfo)
             if (hasRetainedCaptureSession()) {
@@ -923,9 +919,7 @@ class WebRTCManager(private val context: Context) {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
-        Handler(Looper.getMainLooper()).postDelayed({
-            refreshCaptureForDisplayChange("rotate-command")
-        }, 450L)
+        sendRotationConfirmation()
     }
 
     private fun setClipboardText(text: String?) {
@@ -974,16 +968,14 @@ class WebRTCManager(private val context: Context) {
         mqttManager?.publish(topic, gson.toJson(message))
     }
 
-    private fun sendRotationConfirmation(rotation: Int? = null, reason: String? = null) {
+    private fun sendRotationConfirmation() {
         val topic = "control/$username/$deviceName/feedback"
-        val message = mutableMapOf<String, Any>(
+        val message = mapOf(
             "type" to "rotation-confirmation",
             "deviceName" to deviceName,
             "timestamp" to System.currentTimeMillis(),
             "from" to "device"
         )
-        rotation?.let { message["rotation"] = it }
-        reason?.let { message["reason"] = it }
         mqttManager?.publish(topic, gson.toJson(message))
     }
 
@@ -1011,7 +1003,6 @@ class WebRTCManager(private val context: Context) {
     }
 
     private fun clampToDisplay(x: Float, y: Float): TouchPoint {
-        refreshCaptureForDisplayChange("control-coordinate")
         val displayInfo = getDisplayInfo()
         return TouchPoint(
             x = x.coerceIn(0f, (displayInfo.width - 1).toFloat()),
@@ -1077,41 +1068,6 @@ class WebRTCManager(private val context: Context) {
                 else -> 0
             }
         )
-    }
-
-    private fun refreshCaptureForDisplayChange(reason: String) {
-        val displayInfo = getDisplayInfo()
-        val previous = lastDisplayInfo
-        val changed = previous == null ||
-            previous.width != displayInfo.width ||
-            previous.height != displayInfo.height ||
-            previous.rotationDegrees != displayInfo.rotationDegrees
-        if (!changed) {
-            return
-        }
-
-        lastDisplayInfo = displayInfo
-        sendDeviceResolution(displayInfo)
-        sendRotationConfirmation(displayInfo.rotationDegrees, reason)
-
-        val resolved = requestedCaptureConfig.resolve(displayInfo)
-        val needsFormatUpdate = resolved.width != activeCaptureConfig.width ||
-            resolved.height != activeCaptureConfig.height ||
-            resolved.frameRate != activeCaptureConfig.frameRate
-        if (!needsFormatUpdate) {
-            return
-        }
-
-        activeCaptureConfig = resolved
-        (videoCapturer as? ScreenCapturerAndroid)?.let { capturer ->
-            try {
-                capturer.changeCaptureFormat(resolved.width, resolved.height, resolved.frameRate)
-                sendVideoResolution(resolved.width, resolved.height, resolved.frameRate)
-                logCallback?.invoke("↻ 屏幕方向变化，已更新投屏参数: ${resolved.width}x${resolved.height}@${resolved.frameRate}fps")
-            } catch (e: Exception) {
-                logCallback?.invoke("⚠️ 方向变化后更新投屏参数失败: ${e.message}")
-            }
-        }
     }
 
     private fun describeIceCandidate(candidate: IceCandidate): String {
