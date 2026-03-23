@@ -103,6 +103,13 @@ class WebRTCManager(private val context: Context) {
             val displayInfo = getDisplayInfo()
             activeCaptureConfig = requestedCaptureConfig.resolve(displayInfo)
             sendDeviceResolution(displayInfo)
+            
+            // 添加详细日志
+            logCallback?.invoke("📊 分辨率计算详情:")
+            logCallback?.invoke("  - 设备分辨率: ${displayInfo.width}x${displayInfo.height}")
+            logCallback?.invoke("  - 请求配置: ${requestedCaptureConfig.width}x${requestedCaptureConfig.height}@${requestedCaptureConfig.frameRate}fps")
+            logCallback?.invoke("  - 最终配置: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
+            
             if (hasRetainedCaptureSession()) {
                 logCallback?.invoke("Reusing retained MediaProjection capture session")
                 sendVideoResolution(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
@@ -1199,6 +1206,65 @@ class WebRTCManager(private val context: Context) {
             logCallback?.invoke("清理资源时出错: ${e.message}")
         }
     }
+    
+    /** 检查是否正在捕获 */
+    fun isCapturing(): Boolean {
+        return videoCapturer != null && localVideoTrack != null
+    }
+    
+    /** 处理屏幕旋转 */
+    fun handleOrientationChange() {
+        try {
+            logCallback?.invoke("🔄 处理屏幕旋转...")
+            
+            // 获取新的屏幕信息
+            val displayInfo = getDisplayInfo()
+            
+            logCallback?.invoke("📱 新的屏幕分辨率: ${displayInfo.width}x${displayInfo.height} (旋转: ${displayInfo.rotationDegrees}°)")
+            
+            // 发送新的设备分辨率到Web端
+            sendDeviceResolution(displayInfo)
+            
+            // 根据当前配置重新计算视频传输分辨率（不限制质量）
+            activeCaptureConfig = requestedCaptureConfig.resolve(displayInfo)
+            
+            logCallback?.invoke("📹 新的视频传输分辨率: ${activeCaptureConfig.width}x${activeCaptureConfig.height}@${activeCaptureConfig.frameRate}fps")
+            
+            // 调整视频捕获分辨率
+            videoCapturer?.let { capturer ->
+                if (capturer is org.webrtc.ScreenCapturerAndroid) {
+                    capturer.changeCaptureFormat(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
+                    logCallback?.invoke("✓ 视频捕获分辨率已调整")
+                    
+                    // 发送新的视频传输分辨率
+                    sendVideoResolution(activeCaptureConfig.width, activeCaptureConfig.height, activeCaptureConfig.frameRate)
+                    
+                    // 发送旋转通知
+                    sendOrientationChangeNotification(displayInfo.width, displayInfo.height, activeCaptureConfig.width, activeCaptureConfig.height)
+                }
+            }
+            
+        } catch (e: Exception) {
+            logCallback?.invoke("❌ 处理屏幕旋转失败: ${e.message}")
+        }
+    }
+    
+    /** 发送屏幕旋转通知 */
+    private fun sendOrientationChangeNotification(deviceWidth: Int, deviceHeight: Int, videoWidth: Int, videoHeight: Int) {
+        val notificationMessage = mapOf(
+            "type" to "orientation-change",
+            "deviceName" to deviceName,
+            "deviceWidth" to deviceWidth,
+            "deviceHeight" to deviceHeight,
+            "videoWidth" to videoWidth,
+            "videoHeight" to videoHeight,
+            "timestamp" to System.currentTimeMillis(),
+            "from" to "device"
+        )
+        val topic = "control/$username/$deviceName/feedback"
+        mqttManager?.publish(topic, gson.toJson(notificationMessage))
+        logCallback?.invoke("✓ 已发送屏幕旋转通知")
+    }
 
     private fun stopScreenCaptureService() {
         try {
@@ -1247,16 +1313,24 @@ class WebRTCManager(private val context: Context) {
             val safeFrameRate = if (frameRate > 0) frameRate else 60
             val displayLongSide = maxOf(displayInfo.width, displayInfo.height)
             val displayShortSide = minOf(displayInfo.width, displayInfo.height)
+            
+            // 如果没有指定分辨率（unconstrained），使用设备的完整分辨率
             val requestedLongSide = maxOf(width, height).takeIf { it > 0 } ?: displayLongSide
+            
+            // 计算短边，保持宽高比
             val aspectRatio = displayShortSide.toDouble() / displayLongSide.toDouble()
             val resolvedShortSide = ((requestedLongSide * aspectRatio) / 2.0).roundToInt() * 2
+            
+            // 根据设备方向返回正确的宽高
             return if (displayInfo.height >= displayInfo.width) {
+                // 竖屏：高度是长边
                 CaptureConfig(
                     width = resolvedShortSide.coerceAtLeast(2),
                     height = requestedLongSide,
                     frameRate = safeFrameRate
                 )
             } else {
+                // 横屏：宽度是长边
                 CaptureConfig(
                     width = requestedLongSide,
                     height = resolvedShortSide.coerceAtLeast(2),

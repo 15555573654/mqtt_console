@@ -396,4 +396,32 @@ class MainActivity : AppCompatActivity() {
         webrtcManager.release()
         stopScreenCaptureService()
     }
+    
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        
+        // 处理屏幕旋转
+        when (newConfig.orientation) {
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE -> {
+                log("📱 屏幕已旋转到横屏")
+                handleOrientationChange()
+            }
+            android.content.res.Configuration.ORIENTATION_PORTRAIT -> {
+                log("📱 屏幕已旋转到竖屏")
+                handleOrientationChange()
+            }
+        }
+    }
+    
+    private fun handleOrientationChange() {
+        // 如果正在投屏，更新分辨率信息
+        if (webrtcManager.isCapturing()) {
+            log("🔄 检测到屏幕旋转，更新分辨率信息...")
+            
+            // 延迟一小段时间，确保系统完成旋转
+            binding.root.postDelayed({
+                webrtcManager.handleOrientationChange()
+            }, 500)
+        }
+    }
 }

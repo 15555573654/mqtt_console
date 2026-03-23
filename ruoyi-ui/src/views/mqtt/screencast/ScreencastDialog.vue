@@ -634,6 +634,31 @@ export default {
             height: data.height
           };
           break;
+        case 'orientation-change':
+          console.log(`✓ 设备屏幕旋转: 设备${data.deviceWidth}x${data.deviceHeight}, 视频${data.videoWidth}x${data.videoHeight}`);
+          this.$message.info('设备屏幕已旋转，正在调整窗口...');
+          
+          // 更新设备分辨率
+          this.deviceResolution = {
+            width: data.deviceWidth,
+            height: data.deviceHeight
+          };
+          
+          // 更新视频传输分辨率
+          this.videoResolution = {
+            width: data.videoWidth,
+            height: data.videoHeight
+          };
+          
+          // 自动调整弹窗大小以适应新的屏幕方向
+          this.$nextTick(() => {
+            this.autoResizeDialog();
+            // 如果网格正在显示，重新绘制
+            if (this.showGrid) {
+              this.drawGrid();
+            }
+          });
+          break;
         default:
           console.log('未知反馈类型:', data.type);
       }
