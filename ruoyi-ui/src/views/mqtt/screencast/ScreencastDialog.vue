@@ -155,6 +155,7 @@
 
 <script>
 import WebRTCManager from '@/utils/webrtc/WebRTCManager';
+import request from '@/utils/request';
 
 export default {
   name: 'ScreencastDialog',
@@ -995,26 +996,67 @@ export default {
       }
     },
 
+    pickLocalApkFile() {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.apk,application/vnd.android.package-archive';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+
+        input.onchange = () => {
+          const file = input.files && input.files[0] ? input.files[0] : null;
+          document.body.removeChild(input);
+          resolve(file);
+        };
+
+        input.click();
+      });
+    },
+
+    async uploadApkFile(file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await request({
+        url: '/common/upload',
+        method: 'post',
+        data: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      return response && response.url ? response.url : '';
+    },
+
     async installAppFromWeb() {
       try {
-        const { value } = await this.$prompt('请输入APK下载地址', '安装App', {
-          confirmButtonText: '发送到安卓',
-          cancelButtonText: '取消',
-          inputPlaceholder: 'https://example.com/app.apk'
-        });
-        if (!value || !value.trim()) {
+        const file = await this.pickLocalApkFile();
+        if (!file) {
           return;
         }
+
+        const fileName = file.name || '';
+        if (!/\.apk$/i.test(fileName)) {
+          this.$message.warning('请选择 .apk 安装包');
+          return;
+        }
+
+        this.$message.info('正在上传安装包...');
+        const uploadedUrl = await this.uploadApkFile(file);
+        if (!uploadedUrl) {
+          this.$message.error('上传失败，未获取到安装包地址');
+          return;
+        }
+
         await this.sendControlCommand({
           action: 'installApp',
-          url: value.trim(),
+          url: uploadedUrl,
           deviceName: this.deviceName,
           from: 'frontend'
         });
+        this.$message.success('安装请求已发送');
       } catch (error) {
-        if (error !== 'cancel') {
-          this.$message.error('发送安装请求失败');
-        }
+        this.$message.error('发送安装请求失败');
       }
     },
 
