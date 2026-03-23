@@ -114,9 +114,15 @@ class MainActivity : AppCompatActivity() {
                 when (status) {
                     "捕获中", "已连接", "正在连接" -> {
                         binding.btnStartScreen.text = "停止投屏"
+                        mqttManager.updateScriptStatus("运行中")
                     }
                     "未连接", "连接失败", "已断开", "已关闭" -> {
                         binding.btnStartScreen.text = "开始投屏"
+                        mqttManager.updateScriptStatus("未运行")
+                    }
+                    "已停止" -> {
+                        binding.btnStartScreen.text = "开始投屏"
+                        mqttManager.updateScriptStatus("未运行")
                     }
                 }
             }
@@ -186,6 +192,7 @@ class MainActivity : AppCompatActivity() {
                     
                     webrtcManager.setMqttManager(mqttManager)
                     webrtcManager.setDeviceInfo(username, deviceName)
+                    mqttManager.updateScriptStatus("未运行")
                 } else {
                     Toast.makeText(this, "连接失败", Toast.LENGTH_SHORT).show()
                 }

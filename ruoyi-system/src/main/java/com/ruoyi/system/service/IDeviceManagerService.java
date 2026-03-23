@@ -2,7 +2,6 @@ package com.ruoyi.system.service;
 
 import java.util.List;
 
-import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.system.domain.MqttDevice;
 import com.ruoyi.system.domain.vo.MqttDeviceStatistics;
 
@@ -14,42 +13,6 @@ import com.ruoyi.system.domain.vo.MqttDeviceStatistics;
  */
 public interface IDeviceManagerService
 {
-    /**
-     * 注册设备
-     * 
-     * @param deviceName 设备名称
-     * @param username 用户名
-     * @return 设备对象
-     */
-    MqttDevice registerDevice(String deviceName, String username);
-
-    /**
-     * 更新设备状态
-     * 
-     * @param deviceName 设备名称
-     * @param username 用户名
-     * @param status 状态
-     */
-    void updateDeviceStatus(String deviceName, String username, String status);
-
-    /**
-     * 更新脚本状态
-     * 
-     * @param deviceName 设备名称
-     * @param username 用户名
-     * @param scriptStatus 脚本状态
-     */
-    void updateScriptStatus(String deviceName, String username, String scriptStatus);
-
-    /**
-     * 更新游戏数据
-     * 
-     * @param deviceName 设备名称
-     * @param username 用户名
-     * @param gameData 游戏数据
-     */
-    void updateGameData(String deviceName, String username, JSONObject gameData);
-
     /**
      * 查询设备列表
      * 

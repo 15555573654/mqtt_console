@@ -87,6 +87,7 @@ CREATE TABLE `gen_table_column`  (
 -- ----------------------------
 -- Table structure for mqtt_device
 -- ----------------------------
+-- 说明：设备管理页面已切换为仅消费 MQTT 保留消息，本表不再承担 MQTT 实时消息自动入库。
 DROP TABLE IF EXISTS `mqtt_device`;
 CREATE TABLE `mqtt_device`  (
   `device_id` bigint NOT NULL AUTO_INCREMENT COMMENT '设备ID',

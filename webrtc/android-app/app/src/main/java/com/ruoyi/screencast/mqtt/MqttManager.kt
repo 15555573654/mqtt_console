@@ -13,6 +13,7 @@ class MqttManager(private val context: Context) {
     
     private var username: String = ""
     private var deviceName: String = ""
+    private var scriptStatus: String = "未运行"
     
     fun setStatusCallback(callback: (String) -> Unit) {
         statusCallback = callback
@@ -99,6 +100,7 @@ class MqttManager(private val context: Context) {
     
     fun disconnect() {
         try {
+            publishDeviceRuntime("offline")
             mqttClient?.disconnect()
             mqttClient?.close()
             mqttClient = null
@@ -109,14 +111,34 @@ class MqttManager(private val context: Context) {
         }
     }
     
-    fun publish(topic: String, message: String) {
+    fun publish(topic: String, message: String, retained: Boolean = false) {
         try {
             val mqttMessage = MqttMessage(message.toByteArray())
             mqttMessage.qos = 1
+            mqttMessage.isRetained = retained
             mqttClient?.publish(topic, mqttMessage)
         } catch (e: Exception) {
             logCallback?.invoke("发送消息失败: ${e.message}")
         }
+    }
+
+    fun updateScriptStatus(status: String) {
+        scriptStatus = status
+        publishDeviceRuntime("online")
+    }
+
+    fun publishDeviceRuntime(status: String = "online") {
+        if (!isConnected() || username.isBlank() || deviceName.isBlank()) {
+            return
+        }
+        val runtime = mapOf(
+            "deviceName" to deviceName,
+            "status" to status,
+            "scriptStatus" to scriptStatus,
+            "timestamp" to System.currentTimeMillis()
+        )
+        val payload = com.google.gson.Gson().toJson(runtime)
+        publish("status/$username/$deviceName", payload, true)
     }
     
     fun isConnected(): Boolean {
