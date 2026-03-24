@@ -25,11 +25,9 @@
           </span>
         </div>
         <div class="toolbar-actions">
-          <div class="top-action-button" @click.stop="reconnectScreencast" :class="{ disabled: !mqttClient }">
-            <i class="el-icon-connection"></i>
-          </div>
-          <i class="el-icon-setting" @click.stop="showSettings = !showSettings"></i>
-          <i class="el-icon-close" @click.stop="closeDialog"></i>
+          <i class="el-icon-refresh" @click.stop="reconnectScreencast" :class="{ disabled: !mqttClient }" title="重新连接"></i>
+          <i class="el-icon-setting" @click.stop="showSettings = !showSettings" title="设置"></i>
+          <i class="el-icon-close" @click.stop="closeDialog" title="关闭"></i>
         </div>
       </div>
 
@@ -2136,29 +2134,6 @@ export default {
   gap: 15px;
 }
 
-.top-action-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 50%;
-  background: rgba(64, 158, 255, 0.18);
-  color: #fff;
-  cursor: pointer;
-  transition: opacity 0.2s, background 0.2s;
-}
-
-.top-action-button:hover:not(.disabled) {
-  background: rgba(64, 158, 255, 0.3);
-}
-
-.top-action-button.disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
 .toolbar-actions i {
   font-size: 18px;
   cursor: pointer;
@@ -2167,6 +2142,12 @@ export default {
 
 .toolbar-actions i:hover {
   opacity: 0.7;
+}
+
+.toolbar-actions i.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* 视频容器 - 固定大小窗口优化 */
