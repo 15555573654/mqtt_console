@@ -145,6 +145,20 @@ class MqttManager(private val context: Context) {
         return mqttClient?.isConnected ?: false
     }
     
+    /**
+     * 订阅额外的主题
+     */
+    fun subscribe(topic: String, callback: (String, String) -> Unit) {
+        try {
+            mqttClient?.subscribe(topic, 1) { t, msg ->
+                callback(t, msg.toString())
+            }
+            logCallback?.invoke("✓ 已订阅主题: $topic")
+        } catch (e: Exception) {
+            logCallback?.invoke("❌ 订阅主题失败: ${e.message}")
+        }
+    }
+    
     fun getDeviceName(): String = deviceName
     fun getUsername(): String = username
 }

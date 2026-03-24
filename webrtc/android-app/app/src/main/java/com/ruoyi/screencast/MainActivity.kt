@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -14,14 +15,24 @@ import com.ruoyi.screencast.databinding.ActivityMainBinding
 import com.ruoyi.screencast.service.ScreenCaptureService
 import com.ruoyi.screencast.webrtc.WebRTCManager
 import com.ruoyi.screencast.mqtt.MqttManager
+import com.ruoyi.screencast.apk.ApkInstallManager
+import com.ruoyi.screencast.file.FileReceiveManager
+import com.ruoyi.screencast.file.FileBrowserManager
 import java.text.SimpleDateFormat
 import java.util.*
 
 class MainActivity : AppCompatActivity() {
     
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+    
     private lateinit var binding: ActivityMainBinding
     private lateinit var mqttManager: MqttManager
     private lateinit var webrtcManager: WebRTCManager
+    private lateinit var apkInstallManager: ApkInstallManager
+    private lateinit var fileReceiveManager: FileReceiveManager
+    private lateinit var fileBrowserManager: FileBrowserManager
     
     private val SCREEN_CAPTURE_REQUEST = 1001
     private val PERMISSION_REQUEST = 1002
@@ -36,8 +47,13 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
+        Log.d(TAG, "=== MainActivity onCreate ===")
+        
         mqttManager = MqttManager(this)
         webrtcManager = WebRTCManager(this)
+        apkInstallManager = ApkInstallManager(this)
+        fileReceiveManager = FileReceiveManager(this)
+        fileBrowserManager = FileBrowserManager(this)
         
         setupListeners()
         checkPermissions()
@@ -187,6 +203,20 @@ class MainActivity : AppCompatActivity() {
                     
                     webrtcManager.setMqttManager(mqttManager)
                     webrtcManager.setDeviceInfo(username, deviceName)
+                    
+                    // 设置APK安装管理器的日志回调
+                    apkInstallManager.setLogCallback { message ->
+                        log(message)
+                    }
+                    
+                    // 订阅APK传输主题
+                    subscribeApkTopic(username, deviceName)
+                    
+                    // 订阅文件传输主题
+                    subscribeFileTopic(username, deviceName)
+                    
+                    // 订阅文件浏览主题
+                    subscribeFileBrowserTopic(username, deviceName)
                 } else {
                     Toast.makeText(this, "连接失败", Toast.LENGTH_SHORT).show()
                 }
@@ -388,6 +418,173 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+    
+    /**
+     * 订阅APK传输主题
+     */
+    private fun subscribeApkTopic(username: String, deviceName: String) {
+        val apkTopic = "apk/$username/$deviceName"
+        mqttManager.subscribe(apkTopic) { topic, message ->
+            handleApkMessage(message)
+        }
+        log("✓ 已订阅APK传输主题: $apkTopic")
+    }
+    
+    /**
+     * 订阅文件传输主题
+     */
+    private fun subscribeFileTopic(username: String, deviceName: String) {
+        val fileTopic = "file/$username/$deviceName"
+        mqttManager.subscribe(fileTopic) { topic, message ->
+            handleFileMessage(message)
+        }
+        log("✓ 已订阅文件传输主题: $fileTopic")
+    }
+    
+    /**
+     * 订阅文件浏览主题
+     */
+    private fun subscribeFileBrowserTopic(username: String, deviceName: String) {
+        val fileBrowserTopic = "file-browser/$username/$deviceName/request"
+        mqttManager.subscribe(fileBrowserTopic) { topic, message ->
+            handleFileBrowserMessage(message)
+        }
+        log("✓ 已订阅文件浏览主题: $fileBrowserTopic")
+    }
+    
+    /**
+     * 处理APK MQTT消息
+     */
+    private fun handleApkMessage(message: String) {
+        try {
+            val json = org.json.JSONObject(message)
+            val type = json.getString("type")
+            
+            when (type) {
+                "apk-chunk" -> {
+                    val apkId = json.getString("apkId")
+                    val chunkIndex = json.getInt("chunkIndex")
+                    val totalChunks = json.getInt("totalChunks")
+                    val fileName = json.getString("fileName")
+                    val dataBase64 = json.getString("data")
+                    
+                    // Base64解码
+                    val data = android.util.Base64.decode(dataBase64, android.util.Base64.DEFAULT)
+                    
+                    // 传递给APK安装管理器
+                    apkInstallManager.receiveApkChunk(apkId, chunkIndex, totalChunks, data, fileName)
+                }
+                "apk-cancel" -> {
+                    val apkId = json.getString("apkId")
+                    apkInstallManager.cancelApkReceive(apkId)
+                }
+            }
+        } catch (e: Exception) {
+            log("❌ 处理APK消息失败: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    /**
+     * 处理文件MQTT消息
+     */
+    private fun handleFileMessage(message: String) {
+        try {
+            log("📦 收到文件消息")
+            val json = org.json.JSONObject(message)
+            val type = json.getString("type")
+            log("📦 文件消息类型: $type")
+            
+            when (type) {
+                "file-chunk" -> {
+                    val fileId = json.getString("fileId")
+                    val chunkIndex = json.getInt("chunkIndex")
+                    val totalChunks = json.getInt("totalChunks")
+                    val fileName = json.getString("fileName")
+                    val targetPath = json.getString("targetPath")
+                    val dataBase64 = json.getString("data")
+                    
+                    log("📦 文件分块: $fileName [$chunkIndex/$totalChunks] -> $targetPath")
+                    
+                    // 传递给文件接收管理器
+                    fileReceiveManager.handleFileChunk(
+                        fileId, chunkIndex, totalChunks, fileName, targetPath, dataBase64
+                    )
+                }
+                "file-cancel" -> {
+                    val fileId = json.getString("fileId")
+                    log("📦 取消文件接收: $fileId")
+                    fileReceiveManager.cancelFileReceive(fileId)
+                }
+            }
+        } catch (e: Exception) {
+            log("❌ 处理文件消息失败: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    /**
+     * 处理文件浏览MQTT消息
+     */
+    private fun handleFileBrowserMessage(message: String) {
+        try {
+            val json = org.json.JSONObject(message)
+            val action = json.getString("action")
+            val requestId = json.optString("requestId", "")
+            
+            val response = when (action) {
+                "list-directory" -> {
+                    val path = json.getString("path")
+                    fileBrowserManager.listDirectory(path)
+                }
+                "get-common-directories" -> {
+                    fileBrowserManager.getCommonDirectories()
+                }
+                "delete-file" -> {
+                    val path = json.getString("path")
+                    fileBrowserManager.deleteFile(path)
+                }
+                "create-directory" -> {
+                    val path = json.getString("path")
+                    fileBrowserManager.createDirectory(path)
+                }
+                "rename-file" -> {
+                    val oldPath = json.getString("oldPath")
+                    val newName = json.getString("newName")
+                    fileBrowserManager.renameFile(oldPath, newName)
+                }
+                else -> {
+                    org.json.JSONObject().apply {
+                        put("success", false)
+                        put("error", "未知操作: $action")
+                    }
+                }
+            }
+            
+            // 添加requestId到响应中
+            if (requestId.isNotEmpty()) {
+                response.put("requestId", requestId)
+            }
+            response.put("action", action)
+            
+            // 发送响应
+            sendFileBrowserResponse(response.toString())
+            
+        } catch (e: Exception) {
+            log("❌ 处理文件浏览消息失败: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+    
+    /**
+     * 发送文件浏览响应
+     */
+    private fun sendFileBrowserResponse(response: String) {
+        val username = binding.etUsername.text.toString()
+        val deviceName = binding.etDeviceName.text.toString()
+        val topic = "file-browser/$username/$deviceName/response"
+        mqttManager.publish(topic, response)
     }
     
     override fun onDestroy() {

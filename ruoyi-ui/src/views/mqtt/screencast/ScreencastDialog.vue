@@ -83,8 +83,8 @@
             <div class="toolbar-item" @click.stop="pushWebClipboardToAndroid" :class="{ disabled: !mqttClient }" title="write to android">
               <i class="el-icon-edit-outline"></i>
             </div>
-            <div class="toolbar-item" @click.stop="installAppFromWeb" :class="{ disabled: !mqttClient }" title="install app">
-              <i class="el-icon-upload2"></i>
+            <div class="toolbar-item" @click.stop="openFileManagerDialog" :class="{ disabled: !mqttClient }" title="file manager">
+              <i class="el-icon-folder-opened"></i>
             </div>
           </div>
 
@@ -150,17 +150,27 @@
         <div class="resize-handle resize-corner" @mousedown="startResize($event, 'corner')"></div>
       </div>
     </div>
+
+    <!-- 文件管理对话框 -->
+    <FileManagerDialog
+      v-model="fileManagerDialogVisible"
+      :device-name="deviceName"
+      :username="username"
+      :mqtt-client="mqttClient"
+      :default-path="uploadTargetPath"
+    />
   </el-dialog>
 </template>
 
 <script>
 import WebRTCManager from '@/utils/webrtc/WebRTCManager';
-import request from '@/utils/request';
-
-const MAX_APK_UPLOAD_SIZE_MB = 100;
+import FileManagerDialog from '../device/FileManagerDialog.vue';
 
 export default {
   name: 'ScreencastDialog',
+  components: {
+    FileManagerDialog
+  },
   props: {
     value: {
       type: Boolean,
@@ -262,7 +272,11 @@ export default {
       feedbackTopic: '',
       feedbackMessageHandler: null,
       pendingStreamId: '',
-      isReconnecting: false
+      isReconnecting: false,
+      
+      // 文件管理对话框
+      fileManagerDialogVisible: false,
+      uploadTargetPath: ''
     };
   },
   computed: {
@@ -1023,97 +1037,48 @@ export default {
       }
     },
 
-    pickLocalApkFile() {
-      return new Promise((resolve) => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.apk,application/vnd.android.package-archive';
-        input.style.display = 'none';
-        document.body.appendChild(input);
-
-        input.onchange = () => {
-          const file = input.files && input.files[0] ? input.files[0] : null;
-          document.body.removeChild(input);
-          resolve(file);
-        };
-
-        input.click();
-      });
+    /** 打开文件管理对话框 */
+    openFileManagerDialog() {
+      if (!this.mqttClient) {
+        this.$message.warning('MQTT未连接');
+        return;
+      }
+      this.fileManagerDialogVisible = true;
     },
 
-    async uploadApkFile(file) {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await request({
-        url: '/common/upload',
-        method: 'post',
-        data: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        }
-      });
-      return response && response.url ? this.normalizeUploadUrl(response.url) : '';
+    /** 打开APK安装对话框 */
+    openApkInstallDialog() {
+      if (!this.mqttClient) {
+        this.$message.warning('MQTT未连接');
+        return;
+      }
+      this.apkInstallDialogVisible = true;
     },
 
-    normalizeUploadUrl(url) {
-      if (!url) {
-        return '';
+    /** 打开文件上传对话框 */
+    openFileUploadDialog() {
+      if (!this.mqttClient) {
+        this.$message.warning('MQTT未连接');
+        return;
       }
-      try {
-        const parsedUrl = new URL(url, window.location.origin);
-        if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsedUrl.hostname)) {
-          const pageOrigin = new URL(window.location.origin);
-          parsedUrl.protocol = pageOrigin.protocol;
-          parsedUrl.host = pageOrigin.host;
-        }
-        return parsedUrl.toString();
-      } catch (error) {
-        return url;
-      }
-      return response && response.url ? response.url : '';
+      this.fileUploadDialogVisible = true;
     },
 
-    async installAppFromWeb() {
-      try {
-        const file = await this.pickLocalApkFile();
-        if (!file) {
-          return;
-        }
-
-        const fileName = file.name || '';
-        if (!/\.apk$/i.test(fileName)) {
-          this.$message.warning('请选择 .apk 安装包');
-          return;
-        }
-
-        const fileSizeLimit = MAX_APK_UPLOAD_SIZE_MB * 1024 * 1024;
-        if (file.size > fileSizeLimit) {
-          this.$message.warning(`APK大小不能超过 ${MAX_APK_UPLOAD_SIZE_MB}MB`);
-          return;
-        }
-
-        this.$message.info('正在上传安装包...');
-        const uploadedUrl = await this.uploadApkFile(file);
-        if (!uploadedUrl) {
-          this.$message.error('上传失败，未获取到安装包地址');
-          return;
-        }
-
-        await this.sendControlCommand({
-          action: 'installApp',
-          url: uploadedUrl,
-          deviceName: this.deviceName,
-          from: 'frontend'
-        });
-        this.$message.success('安装请求已发送');
-      } catch (error) {
-        const message = error && error.message ? error.message : '';
-        if (message.includes('Maximum upload size exceeded')) {
-          this.$message.error(`上传失败，APK大小不能超过 ${MAX_APK_UPLOAD_SIZE_MB}MB`);
-          return;
-        }
-        this.$message.error('发送安装请求失败');
+    /** 打开文件浏览器对话框 */
+    openFileBrowserDialog() {
+      if (!this.mqttClient) {
+        this.$message.warning('MQTT未连接');
+        return;
       }
+      this.fileBrowserDialogVisible = true;
+    },
+
+    /** 从文件浏览器打开上传对话框 */
+    handleOpenUploadFromBrowser(targetPath) {
+      console.log('ScreencastDialog: handleOpenUploadFromBrowser called, targetPath:', targetPath);
+      this.uploadTargetPath = targetPath;
+      this.fileUploadDialogVisible = true;
+      console.log('ScreencastDialog: fileUploadDialogVisible set to true');
     },
 
     sendControlCommand(payload, showWarning = true) {
