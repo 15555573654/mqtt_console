@@ -12,7 +12,7 @@
   >
     <div class="screencast-wrapper" :style="{ height: dialogHeight + 'px' }">
       <!-- 顶部工具栏 - 可拖动 -->
-      <div class="top-toolbar" @mousedown="startDrag">
+      <div class="top-toolbar" :class="{ 'fullscreen-mode': isDialogFullscreen }" @mousedown="startDrag">
         <div class="device-info">
           <span class="device-name">{{ deviceName }}</span>
           <span class="latency-badge" :class="getLatencyClass()">
@@ -70,7 +70,7 @@
               <i class="el-icon-minus"></i>
             </div>
             <div class="toolbar-item" @click.stop="toggleDialogFullscreen" :class="{ disabled: !isStreaming }" title="fullscreen dialog">
-              <i class="el-icon-full-screen"></i>
+              <i :class="isDialogFullscreen ? 'el-icon-copy-document' : 'el-icon-full-screen'"></i>
             </div>
             <div class="toolbar-item" @click.stop="copyAndroidClipboardToWeb" :class="{ disabled: !mqttClient }" title="copy to web">
               <i class="el-icon-document-copy"></i>
@@ -142,7 +142,7 @@
       </div>
 
       <!-- 缩放手柄 -->
-      <div class="resize-handles" v-if="!isMobile">
+      <div class="resize-handles" v-if="!isMobile && !isDialogFullscreen">
         <div class="resize-handle resize-right" @mousedown="startResize($event, 'right')"></div>
         <div class="resize-handle resize-bottom" @mousedown="startResize($event, 'bottom')"></div>
         <div class="resize-handle resize-corner" @mousedown="startResize($event, 'corner')"></div>
@@ -1238,12 +1238,27 @@ export default {
       }
 
       this.isDialogFullscreen = !this.isDialogFullscreen;
-      if (this.isDialogFullscreen) {
-        this.dialogWidth = window.innerWidth;
-        this.dialogHeight = window.innerHeight;
-      } else {
-        this.autoResizeDialog();
-      }
+      
+      this.$nextTick(() => {
+        const dialog = document.querySelector('.screencast-control-dialog');
+        if (!dialog) return;
+
+        if (this.isDialogFullscreen) {
+          // 进入全屏模式：添加全屏类，覆盖整个屏幕
+          dialog.classList.add('fullscreen-dialog');
+          
+          // 更新内部尺寸
+          this.dialogWidth = window.innerWidth;
+          this.dialogHeight = window.innerHeight;
+        } else {
+          // 退出全屏模式：移除全屏类，恢复正常大小
+          dialog.classList.remove('fullscreen-dialog');
+          
+          // 恢复自适应大小
+          this.autoResizeDialog();
+          this.centerDialog();
+        }
+      });
     },
 
     rotateDeviceScreen() {
@@ -1282,7 +1297,8 @@ export default {
 
     /** 开始拖动 */
     startDrag(e) {
-      if (this.isMobile) return;
+      // 移动端或全屏模式下禁用拖动
+      if (this.isMobile || this.isDialogFullscreen) return;
 
       const dialog = document.querySelector('.screencast-control-dialog');
       if (dialog) {
@@ -1309,7 +1325,8 @@ export default {
 
     /** 开始缩放 */
     startResize(e, type) {
-      if (this.isMobile) return;
+      // 移动端或全屏模式下禁用缩放
+      if (this.isMobile || this.isDialogFullscreen) return;
 
       this.isResizing = true;
       this.resizeType = type;
@@ -2000,6 +2017,18 @@ export default {
   border: none !important;
   box-shadow: none !important;
 }
+
+/* 全屏模式样式 */
+.screencast-control-dialog.fullscreen-dialog {
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  max-width: none !important;
+  transform: none !important;
+}
 </style>
 
 <style scoped>
@@ -2035,6 +2064,11 @@ export default {
   z-index: 10;
   cursor: move;
   user-select: none;
+}
+
+/* 全屏模式下的标题栏 */
+.top-toolbar.fullscreen-mode {
+  cursor: default;
 }
 
 .device-info {

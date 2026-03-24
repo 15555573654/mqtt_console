@@ -172,10 +172,13 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun checkPermissions() {
-        val permissions = arrayOf(
+        val permissions = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.RECORD_AUDIO
         )
+        
+        // 注意：FOREGROUND_SERVICE_MEDIA_PROJECTION 不需要运行时请求
+        // 它是在 AndroidManifest.xml 中声明后自动授予的
         
         val needRequest = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -269,11 +272,13 @@ class MainActivity : AppCompatActivity() {
 
         val hasRetainedCapture = webrtcManager.hasRetainedCaptureSession()
         val hasRunningService = ScreenCaptureService.instance != null
-        val serviceIntent = Intent(this, ScreenCaptureService::class.java)
-        serviceIntent.putExtra("resultCode", pendingScreenCaptureResultCode)
-        serviceIntent.putExtra("data", pendingScreenCaptureData)
-
+        
         try {
+            // 先启动服务并传递权限数据
+            val serviceIntent = Intent(this, ScreenCaptureService::class.java)
+            serviceIntent.putExtra("resultCode", pendingScreenCaptureResultCode)
+            serviceIntent.putExtra("data", pendingScreenCaptureData)
+
             if (!hasRunningService) {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                     startForegroundService(serviceIntent)
@@ -282,6 +287,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 log("ScreenCaptureService started")
             } else {
+                // 服务已运行，只需更新权限数据
+                startService(serviceIntent)
                 log("Reusing existing ScreenCaptureService")
             }
 
@@ -298,7 +305,8 @@ class MainActivity : AppCompatActivity() {
             }, startDelayMs)
         } catch (e: Exception) {
             log("Failed to prepare screen capture: ${e.message}")
-            Toast.makeText(this, "Failed to prepare screen capture: ${e.message}", Toast.LENGTH_LONG).show()
+            e.printStackTrace()
+            Toast.makeText(this, "启动失败: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -405,6 +413,28 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "权限已授权，正在启动投屏", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "权限已授权，可以开始使用", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        
+        if (requestCode == PERMISSION_REQUEST) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (allGranted) {
+                log("✓ 所有权限已授予")
+                Toast.makeText(this, "权限已授予", Toast.LENGTH_SHORT).show()
+            } else {
+                log("⚠️ 部分权限被拒绝")
+                Toast.makeText(this, "部分权限被拒绝，功能可能受限", Toast.LENGTH_LONG).show()
+                
+                // 检查哪些权限被拒绝
+                permissions.forEachIndexed { index, permission ->
+                    if (grantResults[index] != PackageManager.PERMISSION_GRANTED) {
+                        log("❌ 权限被拒绝: $permission")
+                    }
+                }
             }
         }
     }

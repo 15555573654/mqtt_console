@@ -265,9 +265,19 @@ class WebRTCManager(private val context: Context) {
                 logCallback?.invoke("🔄 为确保连接可靠性，重新创建PeerConnection")
                 
                 try {
-                    peerConnection?.close()
-                    peerConnection?.dispose()
+                    val oldPc = peerConnection
                     peerConnection = null
+                    
+                    oldPc?.close()
+                    // 延迟释放，避免 native 层崩溃
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        try {
+                            oldPc?.dispose()
+                        } catch (e: Exception) {
+                            logCallback?.invoke("⚠️ PeerConnection dispose error: ${e.message}")
+                        }
+                    }, 100)
+                    
                     logCallback?.invoke("✓ 旧PeerConnection已清理")
                 } catch (e: Exception) {
                     logCallback?.invoke("⚠️ 清理旧PeerConnection时出错: ${e.message}")
@@ -670,9 +680,20 @@ class WebRTCManager(private val context: Context) {
     private fun handleStopCaptureRequest() {
         logCallback?.invoke("Received stopCapture request; pausing WebRTC streaming only")
         try {
-            peerConnection?.close()
-            peerConnection?.dispose()
+            val oldPc = peerConnection
             peerConnection = null
+            
+            oldPc?.let { pc ->
+                pc.close()
+                // 延迟释放，避免 native 层崩溃
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        pc.dispose()
+                    } catch (e: Exception) {
+                        logCallback?.invoke("⚠️ PeerConnection dispose error: ${e.message}")
+                    }
+                }, 100)
+            }
         } catch (e: Exception) {
             logCallback?.invoke("Failed to close PeerConnection while handling stopCapture: ${e.message}")
         }
@@ -1138,72 +1159,147 @@ class WebRTCManager(private val context: Context) {
         try {
             logCallback?.invoke("🔄 重置WebRTC连接...")
             
-            // 清理现有连接
-            peerConnection?.close()
-            peerConnection?.dispose()
-            peerConnection = null
+            // 先关闭 DataChannel
             controlDataChannel?.close()
             controlDataChannel = null
             
             // 清理待处理的offer
             pendingOffer = null
             
+            // 安全地清理现有连接
+            val oldPc = peerConnection
+            peerConnection = null
+            
+            oldPc?.let { pc ->
+                pc.close()
+                // 延迟释放，避免 native 层崩溃
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        pc.dispose()
+                    } catch (e: Exception) {
+                        logCallback?.invoke("⚠️ PeerConnection dispose error: ${e.message}")
+                    }
+                }, 100)
+            }
+            
             logCallback?.invoke("✓ WebRTC连接已重置，可以重新建立连接")
         } catch (e: Exception) {
-            logCallback?.invoke("重置连接时出错: ${e.message}")
+            logCallback?.invoke("❌ 重置连接时出错: ${e.message}")
+            e.printStackTrace()
         }
     }
     
     fun pauseStreaming() {
         try {
-            peerConnection?.close()
-            peerConnection?.dispose()
-            peerConnection = null
-
+            // 先关闭 DataChannel
             controlDataChannel?.close()
             controlDataChannel = null
+            
+            // 清空待处理的 offer
             pendingOffer = null
-
+            
+            // 安全地关闭 PeerConnection
+            peerConnection?.let { pc ->
+                try {
+                    // 先关闭连接
+                    pc.close()
+                    // 延迟释放，避免 native 层崩溃
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        try {
+                            pc.dispose()
+                        } catch (e: Exception) {
+                            logCallback?.invoke("⚠️ PeerConnection dispose error: ${e.message}")
+                        }
+                    }, 100)
+                } catch (e: Exception) {
+                    logCallback?.invoke("⚠️ PeerConnection close error: ${e.message}")
+                }
+            }
+            peerConnection = null
 
             statusCallback?.invoke("已停止")
             logCallback?.invoke("Screen casting paused; MediaProjection session kept alive")
         } catch (e: Exception) {
             logCallback?.invoke("Pause streaming failed: ${e.message}")
+            e.printStackTrace()
         }
     }
 
     fun release() {
         try {
-            videoCapturer?.stopCapture()
-            videoCapturer?.dispose()
+            // 1. 先停止视频捕获
+            videoCapturer?.let { capturer ->
+                try {
+                    capturer.stopCapture()
+                    capturer.dispose()
+                } catch (e: Exception) {
+                    logCallback?.invoke("⚠️ VideoCapturer cleanup error: ${e.message}")
+                }
+            }
             videoCapturer = null
+            
+            // 2. 关闭 DataChannel
             controlDataChannel?.close()
             controlDataChannel = null
             
-            peerConnection?.close()
-            peerConnection?.dispose()
-            peerConnection = null
-            
-            localVideoTrack?.dispose()
+            // 3. 释放 tracks
+            localVideoTrack?.let { track ->
+                try {
+                    track.setEnabled(false)
+                    track.dispose()
+                } catch (e: Exception) {
+                    logCallback?.invoke("⚠️ VideoTrack cleanup error: ${e.message}")
+                }
+            }
             localVideoTrack = null
             
-            localAudioTrack?.dispose()
+            localAudioTrack?.let { track ->
+                try {
+                    track.setEnabled(false)
+                    track.dispose()
+                } catch (e: Exception) {
+                    logCallback?.invoke("⚠️ AudioTrack cleanup error: ${e.message}")
+                }
+            }
             localAudioTrack = null
             
+            // 4. 安全地关闭 PeerConnection
+            peerConnection?.let { pc ->
+                try {
+                    pc.close()
+                    // 延迟释放，避免 native 层崩溃
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        try {
+                            pc.dispose()
+                        } catch (e: Exception) {
+                            logCallback?.invoke("⚠️ PeerConnection dispose error: ${e.message}")
+                        }
+                    }, 100)
+                } catch (e: Exception) {
+                    logCallback?.invoke("⚠️ PeerConnection close error: ${e.message}")
+                }
+            }
+            peerConnection = null
+            
+            // 5. 释放 sources
             videoSource?.dispose()
             videoSource = null
             
             audioSource?.dispose()
             audioSource = null
+            
+            // 6. 释放 SurfaceTextureHelper
             surfaceTextureHelper?.dispose()
             surfaceTextureHelper = null
             
+            // 7. 清空其他引用
             pendingOffer = null
             screenCaptureIntent = null
             
-            logCallback?.invoke("WebRTC 资源已完全清理")
+            logCallback?.invoke("✓ WebRTC 资源已完全清理")
         } catch (e: Exception) {
-            logCallback?.invoke("清理资源时出错: ${e.message}")
+            logCallback?.invoke("❌ 清理资源时出错: ${e.message}")
+            e.printStackTrace()
         }
     }
     

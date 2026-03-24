@@ -33,19 +33,45 @@ class ScreenCaptureService : Service() {
         mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         createNotificationChannel()
         
-        // Android 14+ 需要指定前台服务类型
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                createNotification(),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, createNotification())
+        try {
+            val notification = createNotification()
+            
+            // Android 14+ 需要指定前台服务类型
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // 使用 ServiceCompat 启动前台服务
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+                android.util.Log.d("ScreenCaptureService", "Android 14+ foreground service started with MEDIA_PROJECTION type")
+            } else {
+                // Android 13 及以下使用标准方法
+                startForeground(NOTIFICATION_ID, notification)
+                android.util.Log.d("ScreenCaptureService", "Foreground service started (Android < 14)")
+            }
+            
+            android.util.Log.d("ScreenCaptureService", "ScreenCaptureService created successfully")
+        } catch (e: SecurityException) {
+            android.util.Log.e("ScreenCaptureService", "SecurityException: ${e.message}")
+            android.util.Log.e("ScreenCaptureService", "This usually means FOREGROUND_SERVICE_MEDIA_PROJECTION permission is missing")
+            e.printStackTrace()
+            
+            // 通知用户并停止服务
+            android.widget.Toast.makeText(
+                applicationContext,
+                "启动前台服务失败：缺少权限",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            
+            // 停止服务
+            stopSelf()
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenCaptureService", "Failed to start foreground service: ${e.message}")
+            e.printStackTrace()
+            stopSelf()
         }
-        
-        android.util.Log.d("ScreenCaptureService", "ScreenCaptureService created and foreground started")
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
