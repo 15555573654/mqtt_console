@@ -536,6 +536,16 @@ export default {
         username: this.username
       });
 
+      // 更新设备控制器配置
+      if (this.deviceController) {
+        this.deviceController.updateConfig(
+          this.mqttClient,
+          this.username,
+          this.deviceName
+        );
+        console.log('[ScreencastDialog] 设备控制器配置已更新');
+      }
+
       this.statusText = '正在连接...';
       this.connectionStatus = 'connecting';
       this.startScreencast();
